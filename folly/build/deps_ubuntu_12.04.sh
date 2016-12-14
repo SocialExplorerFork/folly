@@ -55,7 +55,7 @@ popd
 
 # double-conversion
 pushd .
-wget https://github.com/google/double-conversion/archive/v${DC_VER}.tar.gz \
+wget https://github.com/SocialExplorerFork/double-conversion/archive/v${DC_VER}.tar.gz \
     -O ${DC_NAME}.tar.gz
 tar xzf ${DC_NAME}.tar.gz
 cd ${DC_NAME}

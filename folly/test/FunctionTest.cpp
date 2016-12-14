@@ -102,7 +102,7 @@ TEST(Function, Emptiness_T) {
   EXPECT_NE(g, nullptr);
   EXPECT_NE(nullptr, g);
   // Explicitly convert to bool to work around
-  // https://github.com/google/googletest/issues/429
+  // https://github.com/SocialExplorerFork/googletest/issues/429
   EXPECT_TRUE(bool(g));
   EXPECT_EQ(100, g(99));
 

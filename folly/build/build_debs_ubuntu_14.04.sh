@@ -18,7 +18,7 @@ PKGDIR=${PKGDIR:-/tmp}
 
 DESC="Folly is an open-source C++ library developed and used at Facebook
   as a foundation for our infrastructure."
-URL=https://github.com/facebook/folly
+URL=https://github.com/SocialExplorerFork/folly
 LICENSE="Apache License v2.0"
 MAINTAINER="Folly Eng"
 

@@ -64,7 +64,7 @@
 <h2 id="what-are-the-alternative">What are the alternatives ? <a href="#what-are-the-alternative" class="headerLink">#</a></h2>
 
 <ul>
-<li><a href="https://github.com/facebook/folly/blob/master/folly/futures/" target="_blank">Futures</a> library works great for asynchronous high-level application code. Yet code written using fibers library is generally much simpler and much more efficient (you are not paying the penalty of heap allocation).</li>
+<li><a href="https://github.com/SocialExplorerFork/folly/blob/master/folly/futures/" target="_blank">Futures</a> library works great for asynchronous high-level application code. Yet code written using fibers library is generally much simpler and much more efficient (you are not paying the penalty of heap allocation).</li>
 <li>You can always keep writing your asynchronous code using traditional callback approach. Such code quickly becomes hard to manage and is error-prone. Even though callback approach seems to allow you writing the most efficient code, inefficiency still comes from heap allocations (<tt>std::function</tt>s used for callbacks, context objects to be passed between callbacks etc.)</li>
 </ul></section><section class="dex_document"><h1>Quick guide</h1><p class="dex_introduction"></p><p>Let&#039;s take a look at this basic example:</p>
 
@@ -100,7 +100,7 @@
 
 <p><tt>fibers::Baton</tt> is the core synchronization primitive which is used to suspend a fiber-task and notify when the task may be resumed. <tt>fibers::Baton</tt> supports two basic operations: <tt>wait()</tt> and <tt>post()</tt>. Calling <tt>wait()</tt> on a Baton will suspend current fiber-task until <tt>post()</tt> is called on the same Baton.</p>
 
-<p>Please refer to <a href="https://github.com/facebook/folly/blob/master/folly/fibers/Baton.h" target="_blank">Baton</a> for more detailed documentation.</p>
+<p>Please refer to <a href="https://github.com/SocialExplorerFork/folly/blob/master/folly/fibers/Baton.h" target="_blank">Baton</a> for more detailed documentation.</p>
 
 <div class="remarkup-note"><span class="remarkup-note-word">NOTE:</span> <tt>fibers::Baton</tt> is the only native synchronization primitive of folly::fibers library. All other synchronization primitives provided by folly::fibers are built on top of <tt>fibers::Baton</tt>.</div>
 
@@ -175,7 +175,7 @@
   <span class="o">...</span>
 <span class="o">&#125;</span></pre></div>
 
-<p>Please refer to <a href="https://github.com/facebook/folly/blob/master/folly/fibers/Promise.h" target="_blank">await</a> for more detailed documentation.</p>
+<p>Please refer to <a href="https://github.com/SocialExplorerFork/folly/blob/master/folly/fibers/Promise.h" target="_blank">await</a> for more detailed documentation.</p>
 
 <div class="remarkup-note"><span class="remarkup-note-word">NOTE:</span> most of your code written with folly::fibers, won&#039;t be using <tt>fibers::Baton</tt> or <tt>fibers::await</tt>. These primitives should only be used to integrate with other asynchronous API which are not fibers-compatible.</div>
 
@@ -309,9 +309,9 @@
 <p>First fiber-task will grab a lock and then suspend waiting on a <tt>fibers::Baton</tt>. Then second fiber-task will be run and it will try to grab a lock. Unlike system threads, fiber-task can be only suspended explicitly, so the whole system thread will be blocked waiting on the lock, and we end up with a dead-lock.</p>
 
 <p>There&#039;re generally two ways we can solve this problem. Ideally we would re-design the program to never not hold any locks when fiber-task is suspended. However if we are absolutely sure we need that lock - folly::fibers library provides some fiber-task-aware lock implementations (e.g.
-<a href="https://github.com/facebook/folly/blob/master/folly/fibers/TimedMutex.h" target="_blank">TimedMutex</a>).</p></section><section class="dex_document"><h1>APIs</h1><p class="dex_introduction"></p><h2 id="fibers-baton">fibers::Baton <a href="#fibers-baton" class="headerLink">#</a></h2>
+<a href="https://github.com/SocialExplorerFork/folly/blob/master/folly/fibers/TimedMutex.h" target="_blank">TimedMutex</a>).</p></section><section class="dex_document"><h1>APIs</h1><p class="dex_introduction"></p><h2 id="fibers-baton">fibers::Baton <a href="#fibers-baton" class="headerLink">#</a></h2>
 
-<p>All of the features of folly::fibers library are actually built on top a single synchronization primitive called Baton. <tt>fibers::Baton</tt> is a fiber-specific version of <tt>folly::Baton</tt>. It only  supports two basic operations: <tt>wait()</tt> and <tt>post()</tt>. Whenever <tt>wait()</tt> is called on the Baton, the current thread or fiber-task is suspended, until <tt>post()</tt> is called on the same Baton. <tt>wait()</tt> does not suspend the thread or fiber-task if <tt>post()</tt> was already called on the Baton. Please refer to <a href="https://github.com/facebook/folly/blob/master/folly/fibers/Baton.h" target="_blank">Baton</a> for more detailed documentation.</p>
+<p>All of the features of folly::fibers library are actually built on top a single synchronization primitive called Baton. <tt>fibers::Baton</tt> is a fiber-specific version of <tt>folly::Baton</tt>. It only  supports two basic operations: <tt>wait()</tt> and <tt>post()</tt>. Whenever <tt>wait()</tt> is called on the Baton, the current thread or fiber-task is suspended, until <tt>post()</tt> is called on the same Baton. <tt>wait()</tt> does not suspend the thread or fiber-task if <tt>post()</tt> was already called on the Baton. Please refer to <a href="https://github.com/SocialExplorerFork/folly/blob/master/folly/fibers/Baton.h" target="_blank">Baton</a> for more detailed documentation.</p>
 
 <p>Baton is thread-safe, so <tt>wait()</tt> and <tt>post()</tt> can be (and should be :) ) called from different threads or fiber-tasks.</p>
 
@@ -423,21 +423,21 @@
 
 <p>All the listed synchronization primitives are built using <tt>fiber::Baton</tt>. Please check their source code for detailed documentation.</p>
 
-<p><a href="https://github.com/facebook/folly/blob/master/folly/fibers/Promise.h" target="_blank">await</a></p>
+<p><a href="https://github.com/SocialExplorerFork/folly/blob/master/folly/fibers/Promise.h" target="_blank">await</a></p>
 
-<p><a href="https://github.com/facebook/folly/blob/master/folly/fibers/WhenN.h" target="_blank">collectN</a></p>
+<p><a href="https://github.com/SocialExplorerFork/folly/blob/master/folly/fibers/WhenN.h" target="_blank">collectN</a></p>
 
-<p><a href="https://github.com/facebook/folly/blob/master/folly/fibers/WhenN.h" target="_blank">collectAny</a></p>
+<p><a href="https://github.com/SocialExplorerFork/folly/blob/master/folly/fibers/WhenN.h" target="_blank">collectAny</a></p>
 
-<p><a href="https://github.com/facebook/folly/blob/master/folly/fibers/WhenN.h" target="_blank">collectN</a></p>
+<p><a href="https://github.com/SocialExplorerFork/folly/blob/master/folly/fibers/WhenN.h" target="_blank">collectN</a></p>
 
-<p><a href="https://github.com/facebook/folly/blob/master/folly/fibers/ForEach.h" target="_blank">forEach</a></p>
+<p><a href="https://github.com/SocialExplorerFork/folly/blob/master/folly/fibers/ForEach.h" target="_blank">forEach</a></p>
 
-<p><a href="https://github.com/facebook/folly/blob/master/folly/fibers/AddTasks.h" target="_blank">addTasks</a></p>
+<p><a href="https://github.com/SocialExplorerFork/folly/blob/master/folly/fibers/AddTasks.h" target="_blank">addTasks</a></p>
 
-<p><a href="https://github.com/facebook/folly/blob/master/folly/fibers/TimedMutex.h" target="_blank">TimedMutex</a></p>
+<p><a href="https://github.com/SocialExplorerFork/folly/blob/master/folly/fibers/TimedMutex.h" target="_blank">TimedMutex</a></p>
 
-<p><a href="https://github.com/facebook/folly/blob/master/folly/fibers/TimedMutex.h" target="_blank">TimedRWMutex</a></p></section><section class="dex_document"><h1>Fiber stacks</h1><p class="dex_introduction"></p><p>Similarly to system threads, every fiber-task has some stack space assigned to it. Stack usage goes up with the number of nested function calls and objects allocated on the stack. folly::fibers implementation only supports fiber-tasks with fixed stack size. If you want to have many fiber-tasks running concurrently - you need to reduce the amount of stack assigned to each fiber-task, otherwise you may run out of memory.</p>
+<p><a href="https://github.com/SocialExplorerFork/folly/blob/master/folly/fibers/TimedMutex.h" target="_blank">TimedRWMutex</a></p></section><section class="dex_document"><h1>Fiber stacks</h1><p class="dex_introduction"></p><p>Similarly to system threads, every fiber-task has some stack space assigned to it. Stack usage goes up with the number of nested function calls and objects allocated on the stack. folly::fibers implementation only supports fiber-tasks with fixed stack size. If you want to have many fiber-tasks running concurrently - you need to reduce the amount of stack assigned to each fiber-task, otherwise you may run out of memory.</p>
 
 <h3 id="selecting-stack-size">Selecting stack size <a href="#selecting-stack-size" class="headerLink">#</a></h3>
 

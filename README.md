@@ -60,11 +60,11 @@ documentation.
 ### What's in it?
 
 Because of folly's fairly flat structure, the best way to see what's in it
-is to look at the headers in [top level `folly/` directory](https://github.com/facebook/folly/tree/master/folly). You can also
+is to look at the headers in [top level `folly/` directory](https://github.com/SocialExplorerFork/folly/tree/master/folly). You can also
 check the [`docs` folder](folly/docs) for documentation, starting with the
 [overview](folly/docs/Overview.md).
 
-Folly is published on Github at https://github.com/facebook/folly
+Folly is published on Github at https://github.com/SocialExplorerFork/folly
 
 ### Build Notes
 
@@ -175,7 +175,7 @@ Install the required packages from MacPorts:
 Download and install double-conversion:
 
 ```
-  git clone https://github.com/google/double-conversion.git
+  git clone https://github.com/SocialExplorerFork/double-conversion.git
   cd double-conversion
   cmake -DBUILD_SHARED_LIBS=ON .
   make
@@ -185,7 +185,7 @@ Download and install double-conversion:
 Download and install folly with the parameters listed below:
 
 ```
-  git clone https://github.com/facebook/folly.git
+  git clone https://github.com/SocialExplorerFork/folly.git
   cd folly/folly
   autoreconf -ivf
   ./configure CPPFLAGS="-I/opt/local/include" LDFLAGS="-L/opt/local/lib"
@@ -195,7 +195,7 @@ Download and install folly with the parameters listed below:
 
 #### Other Linux distributions
 
-- double-conversion (https://github.com/google/double-conversion)
+- double-conversion (https://github.com/SocialExplorerFork/double-conversion)
 
   Download and build double-conversion.
   You may need to tell configure where to find it.
