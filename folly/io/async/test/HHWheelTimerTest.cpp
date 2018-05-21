@@ -1,28 +1,24 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements. See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership. The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License. You may obtain a copy of the License at
+ * Copyright 2014-present Facebook, Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
  *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
-#include <folly/io/async/HHWheelTimer.h>
+
 #include <folly/io/async/EventBase.h>
+#include <folly/io/async/HHWheelTimer.h>
 #include <folly/io/async/test/UndelayedDestruction.h>
 #include <folly/io/async/test/Util.h>
-
-#include <gtest/gtest.h>
-#include <vector>
+#include <folly/portability/GTest.h>
 
 using namespace folly;
 using std::chrono::milliseconds;
@@ -58,11 +54,9 @@ class TestTimeout : public HHWheelTimer::Callback {
 
 class TestTimeoutDelayed : public TestTimeout {
  protected:
-    std::chrono::milliseconds getCurTime() override {
-      return std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now().time_since_epoch()) -
-        milliseconds(5);
-    }
+  std::chrono::steady_clock::time_point getCurTime() override {
+    return std::chrono::steady_clock::now() - milliseconds(5);
+  }
 };
 
 struct HHWheelTimerTest : public ::testing::Test {
@@ -434,5 +428,29 @@ TEST_F(HHWheelTimerTest, IntrusivePtr) {
   T_CHECK_TIMEOUT(start, t1.timestamps[0], milliseconds(5));
   T_CHECK_TIMEOUT(start, t2.timestamps[0], milliseconds(5));
   T_CHECK_TIMEOUT(start, t3.timestamps[0], milliseconds(10));
+  T_CHECK_TIMEOUT(start, end, milliseconds(10));
+}
+
+TEST_F(HHWheelTimerTest, GetTimeRemaining) {
+  StackWheelTimer t(&eventBase, milliseconds(1));
+  TestTimeout t1;
+
+  // Not scheduled yet, time remaining should be zero
+  ASSERT_EQ(t1.getTimeRemaining(), milliseconds(0));
+  ASSERT_EQ(t.count(), 0);
+
+  // Scheduled, time remaining should be less than or equal to the scheduled
+  // timeout
+  t.scheduleTimeout(&t1, milliseconds(10));
+  ASSERT_LE(t1.getTimeRemaining(), milliseconds(10));
+
+  TimePoint start;
+  eventBase.loop();
+  TimePoint end;
+
+  // Expired and time remaining should be zero
+  ASSERT_EQ(t1.getTimeRemaining(), milliseconds(0));
+
+  ASSERT_EQ(t.count(), 0);
   T_CHECK_TIMEOUT(start, end, milliseconds(10));
 }

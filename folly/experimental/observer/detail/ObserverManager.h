@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Facebook, Inc.
+ * Copyright 2016-present Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -93,19 +93,19 @@ class ObserverManager {
     return future;
   }
 
-  static void scheduleRefreshNewVersion(Core::Ptr core) {
-    if (core->getVersion() == 0) {
-      scheduleRefresh(std::move(core), 1).get();
-      return;
-    }
-
+  static void scheduleRefreshNewVersion(Core::WeakPtr coreWeak) {
     auto instance = getInstance();
 
     if (!instance) {
       return;
     }
 
-    instance->scheduleNext(std::move(core));
+    instance->scheduleNext(std::move(coreWeak));
+  }
+
+  static void initCore(Core::Ptr core) {
+    DCHECK(core->getVersion() == 0);
+    scheduleRefresh(std::move(core), 1).get();
   }
 
   class DependencyRecorder {
@@ -189,7 +189,7 @@ class ObserverManager {
   struct Singleton;
 
   void scheduleCurrent(Function<void()>);
-  void scheduleNext(Core::Ptr);
+  void scheduleNext(Core::WeakPtr);
 
   class CurrentQueue;
   class NextQueue;
@@ -215,5 +215,5 @@ class ObserverManager {
   using CycleDetector = GraphCycleDetector<const Core*>;
   folly::Synchronized<CycleDetector, std::mutex> cycleDetector_;
 };
-}
-}
+} // namespace observer_detail
+} // namespace folly

@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Facebook, Inc.
+ * Copyright 2012-present Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,8 +15,8 @@
  */
 
 #include <folly/Benchmark.h>
-#include <folly/Foreach.h>
 #include <folly/String.h>
+#include <folly/container/Foreach.h>
 #include <algorithm>
 #include <iostream>
 #include <numeric>
@@ -36,7 +36,7 @@ BENCHMARK(bmRepeatedFun, n) {
     fun();
   }
 }
-BENCHMARK_DRAW_LINE()
+BENCHMARK_DRAW_LINE();
 
 BENCHMARK(gun) {
   static double x = 1;
@@ -44,7 +44,203 @@ BENCHMARK(gun) {
   doNotOptimizeAway(x);
 }
 
-BENCHMARK_DRAW_LINE()
+BENCHMARK_DRAW_LINE();
+
+BENCHMARK(optimizerCanDiscardTrivial, n) {
+  long x = 0;
+  for (long i = 0; i < n; ++i) {
+    for (long j = 0; j < 10000; ++j) {
+      x += j;
+    }
+  }
+}
+
+BENCHMARK(optimizerCanPowerReduceInner1Trivial, n) {
+  long x = 0;
+  for (long i = 0; i < n; ++i) {
+    for (long j = 0; j < 10000; ++j) {
+      x += i + j;
+    }
+    doNotOptimizeAway(x);
+  }
+}
+
+BENCHMARK(optimizerCanPowerReduceInner2Trivial, n) {
+  long x = 0;
+  for (long i = 0; i < n; ++i) {
+    makeUnpredictable(i);
+    for (long j = 0; j < 10000; ++j) {
+      x += i + j;
+    }
+  }
+  doNotOptimizeAway(x);
+}
+
+BENCHMARK(optimizerDisabled1Trivial, n) {
+  long x = 0;
+  for (long i = 0; i < n; ++i) {
+    for (long j = 0; j < 10000; ++j) {
+      x += i + j;
+      doNotOptimizeAway(x);
+    }
+  }
+}
+
+BENCHMARK(optimizerDisabled2Trivial, n) {
+  long x = 0;
+  for (long i = 0; i < n; ++i) {
+    makeUnpredictable(i);
+    for (long j = 0; j < 10000; ++j) {
+      makeUnpredictable(j);
+      x += i + j;
+    }
+  }
+  doNotOptimizeAway(x);
+}
+
+BENCHMARK(optimizerCanPowerReduceInner1TrivialPtr, n) {
+  long x = 0;
+  for (long i = 0; i < n; ++i) {
+    for (long j = 0; j < 10000; ++j) {
+      x += i + j;
+    }
+    doNotOptimizeAway(&x);
+  }
+}
+
+BENCHMARK(optimizerCanPowerReduceInner2TrivialPtr, n) {
+  long x = 0;
+  for (long i = 0; i < n; ++i) {
+    makeUnpredictable(i);
+    for (long j = 0; j < 10000; ++j) {
+      x += i + j;
+    }
+  }
+  doNotOptimizeAway(&x);
+}
+
+BENCHMARK(optimizerDisabled1TrivialPtr, n) {
+  long x = 0;
+  for (long i = 0; i < n; ++i) {
+    for (long j = 0; j < 10000; ++j) {
+      x += i + j;
+      doNotOptimizeAway(&x);
+    }
+  }
+}
+
+namespace {
+class NonTrivialLong {
+ public:
+  explicit NonTrivialLong(long v) : value_(v) {}
+  virtual ~NonTrivialLong() {}
+
+  void operator++() {
+    ++value_;
+  }
+  void operator+=(long rhs) {
+    value_ += rhs;
+  }
+  void operator+=(const NonTrivialLong& rhs) {
+    value_ += rhs.value_;
+  }
+  bool operator<(long rhs) {
+    return value_ < rhs;
+  }
+  NonTrivialLong operator+(const NonTrivialLong& rhs) {
+    return NonTrivialLong(value_ + rhs.value_);
+  }
+
+ private:
+  long value_;
+  long otherStuff_[3];
+};
+} // namespace
+
+BENCHMARK(optimizerCanDiscardNonTrivial, n) {
+  NonTrivialLong x(0);
+  for (NonTrivialLong i(0); i < n; ++i) {
+    for (NonTrivialLong j(0); j < 10000; ++j) {
+      x += j;
+    }
+  }
+}
+
+BENCHMARK(optimizerCanPowerReduceInner1NonTrivial, n) {
+  NonTrivialLong x(0);
+  for (NonTrivialLong i(0); i < n; ++i) {
+    for (NonTrivialLong j(0); j < 10000; ++j) {
+      x += i + j;
+    }
+    doNotOptimizeAway(x);
+  }
+}
+
+BENCHMARK(optimizerCanPowerReduceInner2NonTrivial, n) {
+  NonTrivialLong x(0);
+  for (NonTrivialLong i(0); i < n; ++i) {
+    makeUnpredictable(i);
+    for (NonTrivialLong j(0); j < 10000; ++j) {
+      x += i + j;
+    }
+  }
+  doNotOptimizeAway(x);
+}
+
+BENCHMARK(optimizerDisabled1NonTrivial, n) {
+  NonTrivialLong x(0);
+  for (NonTrivialLong i(0); i < n; ++i) {
+    for (NonTrivialLong j(0); j < 10000; ++j) {
+      x += i + j;
+      doNotOptimizeAway(x);
+    }
+  }
+}
+
+BENCHMARK(optimizerDisabled2NonTrivial, n) {
+  NonTrivialLong x(0);
+  for (NonTrivialLong i(0); i < n; ++i) {
+    makeUnpredictable(i);
+    for (NonTrivialLong j(0); j < 10000; ++j) {
+      makeUnpredictable(j);
+      x += i + j;
+    }
+  }
+  doNotOptimizeAway(x);
+}
+
+BENCHMARK(optimizerCanPowerReduceInner1NonTrivialPtr, n) {
+  NonTrivialLong x(0);
+  for (NonTrivialLong i(0); i < n; ++i) {
+    for (NonTrivialLong j(0); j < 10000; ++j) {
+      x += i + j;
+    }
+    doNotOptimizeAway(&x);
+  }
+}
+
+BENCHMARK(optimizerCanPowerReduceInner2NonTrivialPtr, n) {
+  NonTrivialLong x(0);
+  for (NonTrivialLong i(0); i < n; ++i) {
+    makeUnpredictable(i);
+    for (NonTrivialLong j(0); j < 10000; ++j) {
+      x += i + j;
+    }
+  }
+  doNotOptimizeAway(&x);
+}
+
+BENCHMARK(optimizerDisabled1NonTrivialPtr, n) {
+  NonTrivialLong x(0);
+  for (NonTrivialLong i(0); i < n; ++i) {
+    for (NonTrivialLong j(0); j < 10000; ++j) {
+      x += i + j;
+      doNotOptimizeAway(&x);
+    }
+  }
+}
+
+BENCHMARK_DRAW_LINE();
 
 BENCHMARK(baselinevector) {
   vector<int> v;
@@ -65,13 +261,13 @@ BENCHMARK_RELATIVE(bmVector) {
   }
 }
 
-BENCHMARK_DRAW_LINE()
+BENCHMARK_DRAW_LINE();
 
 BENCHMARK(superslow) {
   sleep(1);
 }
 
-BENCHMARK_DRAW_LINE()
+BENCHMARK_DRAW_LINE();
 
 BENCHMARK(noMulti) {
   fun();
@@ -126,11 +322,11 @@ unsigned paramMultiRel(unsigned iter, unsigned num) {
   return num * iter;
 }
 
-BENCHMARK_PARAM_MULTI(paramMulti, 1);
-BENCHMARK_RELATIVE_PARAM_MULTI(paramMultiRel, 1);
+BENCHMARK_PARAM_MULTI(paramMulti, 1)
+BENCHMARK_RELATIVE_PARAM_MULTI(paramMultiRel, 1)
 
-BENCHMARK_PARAM_MULTI(paramMulti, 5);
-BENCHMARK_RELATIVE_PARAM_MULTI(paramMultiRel, 5);
+BENCHMARK_PARAM_MULTI(paramMulti, 5)
+BENCHMARK_RELATIVE_PARAM_MULTI(paramMultiRel, 5)
 
 BENCHMARK_DRAW_LINE();
 

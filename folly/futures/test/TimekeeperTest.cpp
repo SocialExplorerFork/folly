@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Facebook, Inc.
+ * Copyright 2014-present Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,10 +14,10 @@
  * limitations under the License.
  */
 
-#include <gtest/gtest.h>
-
-#include <folly/futures/Timekeeper.h>
-#include <folly/portability/Unistd.h>
+#include <folly/Singleton.h>
+#include <folly/futures/Future.h>
+#include <folly/futures/ThreadWheelTimekeeper.h>
+#include <folly/portability/GTest.h>
 
 using namespace folly;
 using std::chrono::milliseconds;
@@ -71,13 +71,31 @@ TEST(Timekeeper, futureGetBeforeTimeout) {
 
 TEST(Timekeeper, futureGetTimeout) {
   Promise<int> p;
-  EXPECT_THROW(p.getFuture().get(one_ms), folly::TimedOut);
+  EXPECT_THROW(p.getFuture().get(one_ms), folly::FutureTimeout);
 }
 
 TEST(Timekeeper, futureSleep) {
   auto t1 = now();
   futures::sleep(one_ms).get();
   EXPECT_GE(now() - t1, one_ms);
+}
+
+TEST(Timekeeper, futureSleepHandlesNullTimekeeperSingleton) {
+  Singleton<ThreadWheelTimekeeper>::make_mock([] { return nullptr; });
+  SCOPE_EXIT {
+    Singleton<ThreadWheelTimekeeper>::make_mock();
+  };
+  EXPECT_THROW(futures::sleep(one_ms).get(), FutureNoTimekeeper);
+}
+
+TEST(Timekeeper, futureWithinHandlesNullTimekeeperSingleton) {
+  Singleton<ThreadWheelTimekeeper>::make_mock([] { return nullptr; });
+  SCOPE_EXIT {
+    Singleton<ThreadWheelTimekeeper>::make_mock();
+  };
+  Promise<int> p;
+  auto f = p.getFuture().within(one_ms);
+  EXPECT_THROW(f.get(), FutureNoTimekeeper);
 }
 
 TEST(Timekeeper, futureDelayed) {
@@ -92,17 +110,15 @@ TEST(Timekeeper, futureDelayed) {
 
 TEST(Timekeeper, futureWithinThrows) {
   Promise<int> p;
-  auto f = p.getFuture()
-    .within(one_ms)
-    .onError([](TimedOut&) { return -1; });
+  auto f =
+      p.getFuture().within(one_ms).onError([](FutureTimeout&) { return -1; });
 
   EXPECT_EQ(-1, f.get());
 }
 
 TEST(Timekeeper, futureWithinAlreadyComplete) {
-  auto f = makeFuture(42)
-    .within(one_ms)
-    .onError([&](TimedOut&){ return -1; });
+  auto f =
+      makeFuture(42).within(one_ms).onError([&](FutureTimeout&) { return -1; });
 
   EXPECT_EQ(42, f.get());
 }
@@ -110,8 +126,8 @@ TEST(Timekeeper, futureWithinAlreadyComplete) {
 TEST(Timekeeper, futureWithinFinishesInTime) {
   Promise<int> p;
   auto f = p.getFuture()
-    .within(std::chrono::minutes(1))
-    .onError([&](TimedOut&){ return -1; });
+               .within(std::chrono::minutes(1))
+               .onError([&](FutureTimeout&) { return -1; });
   p.setValue(42);
 
   EXPECT_EQ(42, f.get());
@@ -129,15 +145,23 @@ TEST(Timekeeper, futureWithinException) {
 
 TEST(Timekeeper, onTimeout) {
   bool flag = false;
-  makeFuture(42).delayed(one_ms)
+  makeFuture(42).delayed(10 * one_ms)
     .onTimeout(zero_ms, [&]{ flag = true; return -1; })
     .get();
   EXPECT_TRUE(flag);
 }
 
+TEST(Timekeeper, onTimeoutComplete) {
+  bool flag = false;
+  makeFuture(42)
+    .onTimeout(zero_ms, [&]{ flag = true; return -1; })
+    .get();
+  EXPECT_FALSE(flag);
+}
+
 TEST(Timekeeper, onTimeoutReturnsFuture) {
   bool flag = false;
-  makeFuture(42).delayed(one_ms)
+  makeFuture(42).delayed(10 * one_ms)
     .onTimeout(zero_ms, [&]{ flag = true; return makeFuture(-1); })
     .get();
   EXPECT_TRUE(flag);
@@ -169,6 +193,21 @@ TEST(Timekeeper, chainedInterruptTest) {
   EXPECT_FALSE(test);
 }
 
+TEST(Timekeeper, withinChainedInterruptTest) {
+  bool test = false;
+  Promise<Unit> p;
+  p.setInterruptHandler([&test, &p](const exception_wrapper& ex) {
+    ex.handle(
+        [&test](const FutureCancellation& /* cancellation */) { test = true; });
+    p.setException(ex);
+  });
+  auto f = p.getFuture().within(milliseconds(100));
+  EXPECT_FALSE(test) << "Sanity check";
+  f.cancel();
+  f.wait();
+  EXPECT_TRUE(test);
+}
+
 TEST(Timekeeper, executor) {
   class ExecutorTester : public Executor {
    public:
@@ -179,9 +218,11 @@ TEST(Timekeeper, executor) {
     std::atomic<int> count{0};
   };
 
-  auto f = makeFuture();
+  Promise<Unit> p;
   ExecutorTester tester;
-  f.via(&tester).within(one_ms).then([&](){}).wait();
+  auto f = p.getFuture().via(&tester).within(one_ms).then([&](){});
+  p.setValue();
+  f.wait();
   EXPECT_EQ(2, tester.count);
 }
 
@@ -193,7 +234,7 @@ TEST(Timekeeper, onTimeoutPropagates) {
     makeFuture(42).delayed(one_ms)
       .onTimeout(zero_ms, [&]{ flag = true; })
       .get(),
-    TimedOut);
+    FutureTimeout);
   EXPECT_TRUE(flag);
 }
 */
@@ -209,4 +250,14 @@ TEST_F(TimekeeperFixture, howToCastDuration) {
   // purpose of this example.
   auto f = timeLord_->after(std::chrono::duration_cast<Duration>(
       std::chrono::nanoseconds(1)));
+}
+
+TEST_F(TimekeeperFixture, destruction) {
+  folly::Optional<ThreadWheelTimekeeper> tk;
+  tk.emplace();
+  auto f = tk->after(std::chrono::seconds(10));
+  EXPECT_FALSE(f.isReady());
+  tk.clear();
+  EXPECT_TRUE(f.isReady());
+  EXPECT_TRUE(f.hasException());
 }

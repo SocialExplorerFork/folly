@@ -1,31 +1,28 @@
 /*
- * Copyright 2016 Facebook, Inc.
+ * Copyright 2014-present Facebook, Inc.
  *
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements. See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership. The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License. You may obtain a copy of the License at
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
  *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied. See the License for the
- * specific language governing permissions and limitations
- * under the License.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
+
 #include <folly/io/async/HHWheelTimer.h>
 #include <folly/io/async/Request.h>
 
 #include <folly/Memory.h>
 #include <folly/Optional.h>
 #include <folly/ScopeGuard.h>
+#include <folly/container/BitIterator.h>
 
-#include <folly/Bits.h>
+#include <folly/lang/Bits.h>
 
 #include <cassert>
 
@@ -56,7 +53,7 @@ HHWheelTimer::Callback::~Callback() {
 void HHWheelTimer::Callback::setScheduled(HHWheelTimer* wheel,
                                           std::chrono::milliseconds timeout) {
   assert(wheel_ == nullptr);
-  assert(expiration_ == milliseconds(0));
+  assert(expiration_ == decltype(expiration_){});
 
   wheel_ = wheel;
 
@@ -75,7 +72,7 @@ void HHWheelTimer::Callback::cancelTimeoutImpl() {
   }
 
   wheel_ = nullptr;
-  expiration_ = milliseconds(0);
+  expiration_ = {};
 }
 
 HHWheelTimer::HHWheelTimer(
@@ -150,7 +147,6 @@ void HHWheelTimer::scheduleTimeout(Callback* callback,
 
   callback->context_ = RequestContext::saveContext();
 
-  uint64_t prev = count_;
   count_++;
 
   callback->setScheduled(this, timeout);
@@ -233,7 +229,7 @@ void HHWheelTimer::timeoutExpired() noexcept {
     timeouts.pop_front();
     count_--;
     cb->wheel_ = nullptr;
-    cb->expiration_ = milliseconds(0);
+    cb->expiration_ = {};
     RequestContextScopeGuard rctx(cb->context_);
     cb->timeoutExpired();
     if (isDestroyed) {
@@ -252,7 +248,7 @@ size_t HHWheelTimer::cancelAll() {
   if (count_ != 0) {
     const uint64_t numElements = WHEEL_BUCKETS * WHEEL_SIZE;
     auto maxBuckets = std::min(numElements, count_);
-    auto buckets = folly::make_unique<CallbackList[]>(maxBuckets);
+    auto buckets = std::make_unique<CallbackList[]>(maxBuckets);
     size_t countBuckets = 0;
     for (auto& tick : buckets_) {
       for (auto& bucket : tick) {
@@ -282,7 +278,7 @@ size_t HHWheelTimer::cancelAll() {
 
 void HHWheelTimer::scheduleNextTimeout() {
   auto nextTick = calcNextTick();
-  long tick = 1;
+  int64_t tick = 1;
 
   if (nextTick & WHEEL_MASK) {
     auto bi = makeBitIterator(bitmap_.begin());
@@ -307,8 +303,7 @@ void HHWheelTimer::scheduleNextTimeout() {
 }
 
 int64_t HHWheelTimer::calcNextTick() {
-  auto intervals =
-      (getCurTime().count() - startTime_.count()) / interval_.count();
+  auto intervals = (getCurTime() - startTime_) / interval_;
   // Slow eventbases will have skew between the actual time and the
   // callback time.  To avoid racing the next scheduleNextTimeout()
   // call, always schedule new timeouts against the actual
@@ -320,4 +315,4 @@ int64_t HHWheelTimer::calcNextTick() {
   }
 }
 
-} // folly
+} // namespace folly

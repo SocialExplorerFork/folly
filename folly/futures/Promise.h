@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Facebook, Inc.
+ * Copyright 2014-present Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,18 +16,62 @@
 
 #pragma once
 
+#include <functional>
+
 #include <folly/Portability.h>
 #include <folly/Try.h>
-#include <functional>
+#include <folly/lang/Exception.h>
 
 namespace folly {
 
+class FOLLY_EXPORT PromiseException : public std::logic_error {
+ public:
+  using std::logic_error::logic_error;
+};
+
+class FOLLY_EXPORT PromiseInvalid : public PromiseException {
+ public:
+  PromiseInvalid() : PromiseException("Promise invalid") {}
+};
+
+class FOLLY_EXPORT PromiseAlreadySatisfied : public PromiseException {
+ public:
+  PromiseAlreadySatisfied() : PromiseException("Promise already satisfied") {}
+};
+
+class FOLLY_EXPORT FutureAlreadyRetrieved : public PromiseException {
+ public:
+  FutureAlreadyRetrieved() : PromiseException("Future already retrieved") {}
+};
+
+class FOLLY_EXPORT BrokenPromise : public PromiseException {
+ public:
+  explicit BrokenPromise(const std::string& type)
+      : PromiseException("Broken promise for type name `" + type + '`') {}
+
+  explicit BrokenPromise(const char* type) : BrokenPromise(std::string(type)) {}
+};
+
 // forward declaration
+template <class T>
+class SemiFuture;
 template <class T> class Future;
+
+namespace futures {
+namespace detail {
+template <class T>
+class FutureBase;
+struct EmptyConstruct {};
+template <typename T, typename F>
+class CoreCallbackState;
+} // namespace detail
+} // namespace futures
 
 template <class T>
 class Promise {
-public:
+ public:
+  static Promise<T> makeEmpty() noexcept; // equivalent to moved-from
+
   Promise();
   ~Promise();
 
@@ -39,8 +83,15 @@ public:
   Promise(Promise<T>&&) noexcept;
   Promise& operator=(Promise<T>&&) noexcept;
 
+  /** Return a SemiFuture tied to the shared core state. This can be called only
+    once, thereafter FutureAlreadyRetrieved exception will be raised. */
+  SemiFuture<T> getSemiFuture();
+
   /** Return a Future tied to the shared core state. This can be called only
-    once, thereafter Future already retrieved exception will be raised. */
+    once, thereafter FutureAlreadyRetrieved exception will be raised.
+    NOTE: This function is deprecated. Please use getSemiFuture and pass the
+          appropriate executor to .via on the returned SemiFuture to get a
+          valid Future where necessary. */
   Future<T> getFuture();
 
   /** Fulfill the Promise with an exception_wrapper */
@@ -53,7 +104,7 @@ public:
       p.setException(std::current_exception());
     }
     */
-  FOLLY_DEPRECATED("use setException(exception_wrapper)")
+  [[deprecated("use setException(exception_wrapper)")]]
   void setException(std::exception_ptr const&);
 
   /** Fulfill the Promise with an exception type E, which can be passed to
@@ -69,7 +120,11 @@ public:
   /// bother to set one then you probably will want to fulfill the promise with
   /// an exception (or special value) indicating how the interrupt was
   /// handled.
-  void setInterruptHandler(std::function<void(exception_wrapper const&)>);
+  ///
+  /// `fn` must be copyable and must be invocable with
+  ///   `exception_wrapper const&`
+  template <typename F>
+  void setInterruptHandler(F&& fn);
 
   /// Sugar to fulfill this Promise<Unit>
   template <class B = T>
@@ -93,24 +148,61 @@ public:
   template <class F>
   void setWith(F&& func);
 
-  bool isFulfilled();
+  /// true if this has a shared state;
+  /// false if this has been consumed/moved-out.
+  bool valid() const noexcept {
+    return core_ != nullptr;
+  }
 
-private:
-  typedef typename Future<T>::corePtr corePtr;
-  template <class> friend class Future;
+  bool isFulfilled() const noexcept;
+
+ private:
+  template <class>
+  friend class futures::detail::FutureBase;
+  template <class>
+  friend class SemiFuture;
+  template <class>
+  friend class Future;
+  template <class, class>
+  friend class futures::detail::CoreCallbackState;
 
   // Whether the Future has been retrieved (a one-time operation).
   bool retrieved_;
 
+  using CoreType = typename Future<T>::CoreType;
+  using corePtr = typename Future<T>::corePtr;
+
+  // Throws PromiseInvalid if there is no shared state object; else returns it
+  // by ref.
+  //
+  // Implementation methods should usually use this instead of `this->core_`.
+  // The latter should be used only when you need the possibly-null pointer.
+  CoreType& getCore() {
+    return getCoreImpl(core_);
+  }
+  CoreType const& getCore() const {
+    return getCoreImpl(core_);
+  }
+
+  template <typename CoreT>
+  static CoreT& getCoreImpl(CoreT* core) {
+    if (!core) {
+      throw_exception<PromiseInvalid>();
+    }
+    return *core;
+  }
+
   // shared core state object
+  // usually you should use `getCore()` instead of directly accessing `core_`.
   corePtr core_;
 
-  void throwIfFulfilled();
-  void throwIfRetrieved();
+  explicit Promise(futures::detail::EmptyConstruct) noexcept;
+
+  void throwIfFulfilled() const;
   void detach();
 };
 
-}
+} // namespace folly
 
 #include <folly/futures/Future.h>
 #include <folly/futures/Promise-inl.h>

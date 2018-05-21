@@ -128,7 +128,7 @@ critical sections:
     void RequestHandler::processRequest(const Request& request) {
       stop_watch<> watch;
       checkRequestValidity(request);
-      requestQueue_.withWLock([](auto& queue) {
+      requestQueue_.withWLock([&](auto& queue) {
         // withWLock() automatically holds the lock for the
         // duration of this lambda function
         queue.push_back(request);
@@ -150,7 +150,7 @@ the lock as soon as possible.
 `Synchronized` is a template with two parameters, the data type and a
 mutex type: `Synchronized<T, Mutex>`.
 
-If not specified, the mutex type defaults to `std::mutex`.  However, any
+If not specified, the mutex type defaults to `folly::SharedMutex`.  However, any
 mutex type supported by `folly::LockTraits` can be used instead.
 `folly::LockTraits` can be specialized to support other custom mutex
 types that it does not know about out of the box.  See
@@ -366,7 +366,7 @@ This code does not have the same problem as the counter-example with
 When using `Synchronized` with a shared mutex type, it provides separate
 `withWLock()` and `withRLock()` methods instead of `withLock()`.
 
-#### `ulock()` and `withULockPtr()` 
+#### `ulock()` and `withULockPtr()`
 
 `Synchronized` also supports upgrading and downgrading mutex lock levels as
 long as the mutex type used to instantiate the `Synchronized` type has the
@@ -397,8 +397,8 @@ downgraded by calling any of the following methods on the `LockedPtr` proxy
 
 * `moveFromUpgradeToWrite()`
 * `moveFromWriteToUpgrade()`
-* `moveFromWriteToShared()`
-* `moveFromUpgradeToShared()`
+* `moveFromWriteToRead()`
+* `moveFromUpgradeToRead()`
 
 Calling these leaves the `LockedPtr` object on which the method was called in
 an invalid `null` state and returns another LockedPtr proxy holding the
@@ -429,15 +429,15 @@ This "move" can also occur in the context of a `withULockPtr()`
         // ulock is now null
         wlock->updateObj();
 
-        // release write lock and acquire shared lock atomically
-        auto rlock = wlock.moveFromWriteToShared();
+        // release write lock and acquire read lock atomically
+        auto rlock = wlock.moveFromWriteToRead();
         // wlock is now null
         return rlock->newSize();
 
       } else {
 
-        // release upgrade lock and acquire shared lock atomically
-        auto rlock = ulock.moveFromUpgradeToShared();
+        // release upgrade lock and acquire read lock atomically
+        auto rlock = ulock.moveFromUpgradeToRead();
         // ulock is now null
         return rlock->newSize();
       }
@@ -669,8 +669,8 @@ The `LockedPtr` returned by `Synchronized<T, std::mutex>::lock()` has a
     // Assuming some other thread will put data on vec and signal
     // emptySignal, we can then wait on it as follows:
     auto locked = vec.lock();
-    emptySignal.wait_for(locked.getUniqueLock(),
-                         [&] { return !locked->empty(); });
+    emptySignal.wait(locked.getUniqueLock(),
+                     [&] { return !locked->empty(); });
 ```
 
 ### `acquireLocked()`
@@ -728,7 +728,7 @@ which will make the returned tuple more convenient to use:
 An `acquireLockedPair()` function is also available, which returns a
 `std::pair` instead of a `std::tuple`.  This is more convenient to use
 in many situations, until compiler support for structured bindings is
-more widely available. 
+more widely available.
 
 ### Synchronizing several data items with one mutex
 

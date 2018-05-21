@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Facebook, Inc.
+ * Copyright 2016-present Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 
 #include <folly/Expected.h>
 #include <folly/Portability.h>
+#include <folly/portability/GTest.h>
 
 #include <algorithm>
 #include <iomanip>
@@ -25,7 +26,6 @@
 #include <vector>
 
 #include <glog/logging.h>
-#include <gtest/gtest.h>
 
 using std::unique_ptr;
 using std::shared_ptr;
@@ -64,17 +64,17 @@ TEST(Expected, NoDefault) {
   static_assert(
       std::is_default_constructible<Expected<NoDefault, int>>::value, "");
   Expected<NoDefault, int> x{in_place, 42, 42};
-  EXPECT_TRUE(x);
+  EXPECT_TRUE(bool(x));
   x.emplace(4, 5);
   EXPECT_TRUE(bool(x));
   x = makeUnexpected(42);
-  EXPECT_FALSE(x);
+  EXPECT_FALSE(bool(x));
   EXPECT_EQ(42, x.error());
 }
 
 TEST(Expected, String) {
   Expected<std::string, int> maybeString;
-  EXPECT_FALSE(maybeString);
+  EXPECT_FALSE(bool(maybeString));
   EXPECT_EQ(0, maybeString.error());
   maybeString = "hello";
   EXPECT_TRUE(bool(maybeString));
@@ -187,7 +187,7 @@ TEST(Expected, value_or_noncopyable) {
 }
 
 struct ExpectingDeleter {
-  explicit ExpectingDeleter(int expected) : expected(expected) {}
+  explicit ExpectingDeleter(int expected_) : expected(expected_) {}
   int expected;
   void operator()(const int* ptr) {
     EXPECT_EQ(*ptr, expected);
@@ -230,10 +230,10 @@ TEST(Expected, Unique) {
 
   ex = makeUnexpected(-1);
   // empty->moved
-  ex = unique_ptr<int>(new int(6));
+  ex = std::make_unique<int>(6);
   EXPECT_EQ(6, **ex);
   // full->moved
-  ex = unique_ptr<int>(new int(7));
+  ex = std::make_unique<int>(7);
   EXPECT_EQ(7, **ex);
 
   // move it out by move construct
@@ -560,6 +560,36 @@ TEST(Expected, NoThrowMoveAssignable) {
       (std::is_nothrow_move_assignable<Expected<ThrowingBadness, E>>::value));
 }
 
+struct NoSelfAssign {
+  NoSelfAssign() = default;
+  NoSelfAssign(NoSelfAssign&&) = default;
+  NoSelfAssign(const NoSelfAssign&) = default;
+  NoSelfAssign& operator=(NoSelfAssign&& that) {
+    EXPECT_NE(this, &that);
+    return *this;
+  }
+  NoSelfAssign& operator=(const NoSelfAssign& that) {
+    EXPECT_NE(this, &that);
+    return *this;
+  }
+};
+
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpragmas"
+#pragma GCC diagnostic ignored "-Wself-move"
+#endif
+
+TEST(Expected, NoSelfAssign) {
+  folly::Expected<NoSelfAssign, int> e {NoSelfAssign{}};
+  e = e; // @nolint
+  e = std::move(e); // @nolint
+}
+
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+
 struct NoDestructor {};
 
 struct WithDestructor {
@@ -646,7 +676,7 @@ TEST(Expected, Then) {
     // Error case:
     Expected<int, E> ex = Expected<std::unique_ptr<int>, E>{
         unexpected, E::E1}.then([](std::unique_ptr<int> p) -> int {
-      EXPECT_TRUE(false);
+      ADD_FAILURE();
       return *p;
     });
     EXPECT_FALSE(bool(ex));
@@ -714,4 +744,4 @@ TEST(Expected, ThenOrThrow) {
         Unexpected<E>::BadExpectedAccess);
   }
 }
-}
+} // namespace folly

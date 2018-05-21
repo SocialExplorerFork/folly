@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Facebook, Inc.
+ * Copyright 2013-present Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@
 
 #include <boost/iterator/iterator_facade.hpp>
 
-#include <folly/SpookyHashV2.h>
+#include <folly/hash/SpookyHashV2.h>
 
 namespace folly {
 
@@ -37,7 +37,7 @@ class RecordIOReader::Iterator : public boost::iterator_facade<
   bool equal(const Iterator& other) const { return range_ == other.range_; }
   void increment() {
     size_t skip = recordio_helpers::headerSize() + recordAndPos_.first.size();
-    recordAndPos_.second += skip;
+    recordAndPos_.second += off_t(skip);
     range_.advance(skip);
     advanceToValid();
   }
@@ -59,7 +59,7 @@ inline auto RecordIOReader::seek(off_t pos) const -> Iterator {
 
 namespace recordio_helpers {
 
-namespace detail {
+namespace recordio_detail {
 
 FOLLY_PACK_PUSH
 struct Header {
@@ -82,14 +82,14 @@ FOLLY_PACK_POP
 static_assert(offsetof(Header, headerHash) + sizeof(Header::headerHash) ==
               sizeof(Header), "invalid header layout");
 
-}  // namespace detail
+} // namespace recordio_detail
 
-constexpr size_t headerSize() { return sizeof(detail::Header); }
+constexpr size_t headerSize() { return sizeof(recordio_detail::Header); }
 
 inline RecordInfo findRecord(ByteRange range, uint32_t fileId) {
   return findRecord(range, range, fileId);
 }
 
-}  // namespace recordio_helpers
+} // namespace recordio_helpers
 
-}  // namespaces
+} // namespace folly

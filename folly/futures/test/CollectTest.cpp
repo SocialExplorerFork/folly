@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Facebook, Inc.
+ * Copyright 2015-present Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,14 +14,13 @@
  * limitations under the License.
  */
 
-#include <gtest/gtest.h>
-
 #include <numeric>
 
 #include <boost/thread/barrier.hpp>
 
-#include <folly/futures/Future.h>
 #include <folly/Random.h>
+#include <folly/futures/Future.h>
+#include <folly/portability/GTest.h>
 #include <folly/small_vector.h>
 
 using namespace folly;
@@ -37,8 +36,9 @@ TEST(Collect, collectAll) {
     std::vector<Promise<int>> promises(10);
     std::vector<Future<int>> futures;
 
-    for (auto& p : promises)
+    for (auto& p : promises) {
       futures.push_back(p.getFuture());
+    }
 
     auto allf = collectAll(futures);
 
@@ -60,8 +60,9 @@ TEST(Collect, collectAll) {
     std::vector<Promise<int>> promises(4);
     std::vector<Future<int>> futures;
 
-    for (auto& p : promises)
+    for (auto& p : promises) {
       futures.push_back(p.getFuture());
+    }
 
     auto allf = collectAll(futures);
 
@@ -92,18 +93,20 @@ TEST(Collect, collectAll) {
     std::vector<Promise<Unit>> promises(10);
     std::vector<Future<Unit>> futures;
 
-    for (auto& p : promises)
+    for (auto& p : promises) {
       futures.push_back(p.getFuture());
+    }
 
-    auto allf = collectAll(futures)
-      .then([](Try<std::vector<Try<Unit>>>&& ts) {
-        for (auto& f : ts.value())
-          f.value();
-      });
+    auto allf = collectAll(futures).then([](Try<std::vector<Try<Unit>>>&& ts) {
+      for (auto& f : ts.value()) {
+        f.value();
+      }
+    });
 
     std::shuffle(promises.begin(), promises.end(), rng);
-    for (auto& p : promises)
+    for (auto& p : promises) {
       p.setValue();
+    }
     EXPECT_TRUE(allf.isReady());
   }
 }
@@ -114,8 +117,9 @@ TEST(Collect, collect) {
     std::vector<Promise<int>> promises(10);
     std::vector<Future<int>> futures;
 
-    for (auto& p : promises)
+    for (auto& p : promises) {
       futures.push_back(p.getFuture());
+    }
 
     auto allf = collect(futures);
 
@@ -136,8 +140,9 @@ TEST(Collect, collect) {
     std::vector<Promise<int>> promises(10);
     std::vector<Future<int>> futures;
 
-    for (auto& p : promises)
+    for (auto& p : promises) {
       futures.push_back(p.getFuture());
+    }
 
     auto allf = collect(futures);
 
@@ -171,8 +176,9 @@ TEST(Collect, collect) {
     std::vector<Promise<Unit>> promises(10);
     std::vector<Future<Unit>> futures;
 
-    for (auto& p : promises)
+    for (auto& p : promises) {
       futures.push_back(p.getFuture());
+    }
 
     auto allf = collect(futures);
 
@@ -190,8 +196,9 @@ TEST(Collect, collect) {
     std::vector<Promise<Unit>> promises(10);
     std::vector<Future<Unit>> futures;
 
-    for (auto& p : promises)
+    for (auto& p : promises) {
       futures.push_back(p.getFuture());
+    }
 
     auto allf = collect(futures);
 
@@ -225,8 +232,9 @@ TEST(Collect, collect) {
     std::vector<Promise<std::unique_ptr<int>>> promises(10);
     std::vector<Future<std::unique_ptr<int>>> futures;
 
-    for (auto& p : promises)
+    for (auto& p : promises) {
       futures.push_back(p.getFuture());
+    }
 
     collect(futures);
   }
@@ -248,8 +256,9 @@ TEST(Collect, collectNotDefaultConstructible) {
   std::iota(indices.begin(), indices.end(), 0);
   std::shuffle(indices.begin(), indices.end(), rng);
 
-  for (auto& p : promises)
+  for (auto& p : promises) {
     futures.push_back(p.getFuture());
+  }
 
   auto allf = collect(futures);
 
@@ -271,8 +280,9 @@ TEST(Collect, collectAny) {
     std::vector<Promise<int>> promises(10);
     std::vector<Future<int>> futures;
 
-    for (auto& p : promises)
+    for (auto& p : promises) {
       futures.push_back(p.getFuture());
+    }
 
     for (auto& f : futures) {
       EXPECT_FALSE(f.isReady());
@@ -299,8 +309,9 @@ TEST(Collect, collectAny) {
     std::vector<Promise<Unit>> promises(10);
     std::vector<Future<Unit>> futures;
 
-    for (auto& p : promises)
+    for (auto& p : promises) {
       futures.push_back(p.getFuture());
+    }
 
     for (auto& f : futures) {
       EXPECT_FALSE(f.isReady());
@@ -320,8 +331,9 @@ TEST(Collect, collectAny) {
     std::vector<Promise<int>> promises(10);
     std::vector<Future<int>> futures;
 
-    for (auto& p : promises)
+    for (auto& p : promises) {
       futures.push_back(p.getFuture());
+    }
 
     auto anyf = collectAny(futures)
       .then([](std::pair<size_t, Try<int>> p) {
@@ -404,8 +416,9 @@ TEST(Collect, collectAnyWithoutException) {
 TEST(Collect, alreadyCompleted) {
   {
     std::vector<Future<Unit>> fs;
-    for (int i = 0; i < 10; i++)
+    for (int i = 0; i < 10; i++) {
       fs.push_back(makeFuture());
+    }
 
     collectAll(fs)
       .then([&](std::vector<Try<Unit>> ts) {
@@ -414,8 +427,9 @@ TEST(Collect, alreadyCompleted) {
   }
   {
     std::vector<Future<int>> fs;
-    for (int i = 0; i < 10; i++)
+    for (int i = 0; i < 10; i++) {
       fs.push_back(makeFuture(i));
+    }
 
     collectAny(fs)
       .then([&](std::pair<size_t, Try<int>> p) {
@@ -556,24 +570,65 @@ TEST(Collect, collectN) {
   std::vector<Promise<Unit>> promises(10);
   std::vector<Future<Unit>> futures;
 
-  for (auto& p : promises)
+  for (auto& p : promises) {
     futures.push_back(p.getFuture());
+  }
 
   bool flag = false;
   size_t n = 3;
   collectN(futures, n)
-    .then([&](std::vector<std::pair<size_t, Try<Unit>>> v) {
-      flag = true;
-      EXPECT_EQ(n, v.size());
-      for (auto& tt : v)
-        EXPECT_TRUE(tt.second.hasValue());
-    });
+      .via(&folly::InlineExecutor::instance())
+      .then([&](std::vector<std::pair<size_t, Try<Unit>>> v) {
+        flag = true;
+        EXPECT_EQ(n, v.size());
+        for (auto& tt : v) {
+          EXPECT_TRUE(tt.second.hasValue());
+        }
+      });
 
   promises[0].setValue();
   EXPECT_FALSE(flag);
   promises[1].setValue();
   EXPECT_FALSE(flag);
   promises[2].setValue();
+  EXPECT_TRUE(flag);
+}
+
+TEST(Collect, collectNParallel) {
+  std::vector<Promise<Unit>> ps(100);
+  std::vector<Future<Unit>> futures;
+
+  for (auto& p : ps) {
+    futures.push_back(p.getFuture());
+  }
+
+  bool flag = false;
+  size_t n = 90;
+  collectN(futures, n)
+      .via(&folly::InlineExecutor::instance())
+      .then([&](std::vector<std::pair<size_t, Try<Unit>>> v) {
+        flag = true;
+        EXPECT_EQ(n, v.size());
+        for (auto& tt : v) {
+          EXPECT_TRUE(tt.second.hasValue());
+        }
+      });
+
+  std::vector<std::thread> ts;
+  boost::barrier barrier(ps.size() + 1);
+  for (size_t i = 0; i < ps.size(); i++) {
+    ts.emplace_back([&ps, &barrier, i]() {
+      barrier.wait();
+      ps[i].setValue();
+    });
+  }
+
+  barrier.wait();
+
+  for (size_t i = 0; i < ps.size(); i++) {
+    ts[i].join();
+  }
+
   EXPECT_TRUE(flag);
 }
 
@@ -587,16 +642,18 @@ TEST(Collect, smallVector) {
   {
     folly::small_vector<Future<Unit>> futures;
 
-    for (int i = 0; i < 10; i++)
+    for (int i = 0; i < 10; i++) {
       futures.push_back(makeFuture());
+    }
 
     auto anyf = collectAny(futures);
   }
   {
     folly::small_vector<Future<Unit>> futures;
 
-    for (int i = 0; i < 10; i++)
+    for (int i = 0; i < 10; i++) {
       futures.push_back(makeFuture());
+    }
 
     auto allf = collectAll(futures);
   }

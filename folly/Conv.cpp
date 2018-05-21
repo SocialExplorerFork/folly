@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Facebook, Inc.
+ * Copyright 2011-present Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -86,7 +86,7 @@ template <> const char *const MaxString<__uint128_t>::value =
 // still not overflow uint16_t.
 constexpr int32_t OOR = 10000;
 
-FOLLY_ALIGNED(16) constexpr uint16_t shift1[] = {
+alignas(16) constexpr uint16_t shift1[] = {
   OOR, OOR, OOR, OOR, OOR, OOR, OOR, OOR, OOR, OOR,  // 0-9
   OOR, OOR, OOR, OOR, OOR, OOR, OOR, OOR, OOR, OOR,  //  10
   OOR, OOR, OOR, OOR, OOR, OOR, OOR, OOR, OOR, OOR,  //  20
@@ -115,7 +115,7 @@ FOLLY_ALIGNED(16) constexpr uint16_t shift1[] = {
   OOR, OOR, OOR, OOR, OOR, OOR                       // 250
 };
 
-FOLLY_ALIGNED(16) constexpr uint16_t shift10[] = {
+alignas(16) constexpr uint16_t shift10[] = {
   OOR, OOR, OOR, OOR, OOR, OOR, OOR, OOR, OOR, OOR,  // 0-9
   OOR, OOR, OOR, OOR, OOR, OOR, OOR, OOR, OOR, OOR,  //  10
   OOR, OOR, OOR, OOR, OOR, OOR, OOR, OOR, OOR, OOR,  //  20
@@ -144,7 +144,7 @@ FOLLY_ALIGNED(16) constexpr uint16_t shift10[] = {
   OOR, OOR, OOR, OOR, OOR, OOR                       // 250
 };
 
-FOLLY_ALIGNED(16) constexpr uint16_t shift100[] = {
+alignas(16) constexpr uint16_t shift100[] = {
   OOR, OOR, OOR, OOR, OOR, OOR, OOR, OOR, OOR, OOR,  // 0-9
   OOR, OOR, OOR, OOR, OOR, OOR, OOR, OOR, OOR, OOR,  //  10
   OOR, OOR, OOR, OOR, OOR, OOR, OOR, OOR, OOR, OOR,  //  20
@@ -173,7 +173,7 @@ FOLLY_ALIGNED(16) constexpr uint16_t shift100[] = {
   OOR, OOR, OOR, OOR, OOR, OOR                       // 250
 };
 
-FOLLY_ALIGNED(16) constexpr uint16_t shift1000[] = {
+alignas(16) constexpr uint16_t shift1000[] = {
   OOR, OOR, OOR, OOR, OOR, OOR, OOR, OOR, OOR, OOR,  // 0-9
   OOR, OOR, OOR, OOR, OOR, OOR, OOR, OOR, OOR, OOR,  //  10
   OOR, OOR, OOR, OOR, OOR, OOR, OOR, OOR, OOR, OOR,  //  20
@@ -235,7 +235,7 @@ using IsAscii = std::
 // The code in this file that uses tolower() really only cares about
 // 7-bit ASCII characters, so we can take a nice shortcut here.
 inline char tolower_ascii(char in) {
-  return IsAscii::value ? in | 0x20 : std::tolower(in);
+  return IsAscii::value ? in | 0x20 : char(std::tolower(in));
 }
 
 inline bool bool_str_cmp(const char** b, size_t len, const char* value) {
@@ -255,7 +255,7 @@ inline bool bool_str_cmp(const char** b, size_t len, const char* value) {
   return true;
 }
 
-} // anonymous namespace
+} // namespace
 
 Expected<bool, ConversionCode> str_to_bool(StringPiece* src) noexcept {
   auto b = src->begin(), e = src->end();
@@ -269,7 +269,7 @@ Expected<bool, ConversionCode> str_to_bool(StringPiece* src) noexcept {
   }
 
   bool result;
-  size_t len = e - b;
+  size_t len = size_t(e - b);
   switch (*b) {
     case '0':
     case '1': {
@@ -361,11 +361,28 @@ Expected<Tgt, ConversionCode> str_to_floating(StringPiece* src) noexcept {
     // want to raise an error; length will point past the last character
     // that was processed, so we need to check if that character was
     // whitespace or not.
-    if (length == 0 || (result == 0.0 && std::isspace((*src)[length - 1]))) {
+    if (length == 0 ||
+        (result == 0.0 && std::isspace((*src)[size_t(length) - 1]))) {
       return makeUnexpected(ConversionCode::EMPTY_INPUT_STRING);
     }
-    src->advance(length);
-    return result;
+    if (length >= 2) {
+      const char* suffix = src->data() + length - 1;
+      // double_conversion doesn't update length correctly when there is an
+      // incomplete exponent specifier. Converting "12e-f-g" shouldn't consume
+      // any more than "12", but it will consume "12e-".
+
+      // "123-" should only parse "123"
+      if (*suffix == '-' || *suffix == '+') {
+        --suffix;
+        --length;
+      }
+      // "12e-f-g" or "12euro" should only parse "12"
+      if (*suffix == 'e' || *suffix == 'E') {
+        --length;
+      }
+    }
+    src->advance(size_t(length));
+    return Tgt(result);
   }
 
   auto* e = src->end();
@@ -374,7 +391,7 @@ Expected<Tgt, ConversionCode> str_to_floating(StringPiece* src) noexcept {
 
   // There must be non-whitespace, otherwise we would have caught this above
   assert(b < e);
-  size_t size = e - b;
+  size_t size = size_t(e - b);
 
   bool negative = false;
   if (*b == '-') {
@@ -423,7 +440,7 @@ Expected<Tgt, ConversionCode> str_to_floating(StringPiece* src) noexcept {
 
   src->assign(b, e);
 
-  return result;
+  return Tgt(result);
 }
 
 template Expected<float, ConversionCode> str_to_floating<float>(
@@ -463,12 +480,12 @@ class SignedValueHandler<T, true> {
   Expected<T, ConversionCode> finalize(U value) {
     T rv;
     if (negative_) {
-      rv = -value;
+      rv = T(-value);
       if (UNLIKELY(rv > 0)) {
         return makeUnexpected(ConversionCode::NEGATIVE_OVERFLOW);
       }
     } else {
-      rv = value;
+      rv = T(value);
       if (UNLIKELY(rv < 0)) {
         return makeUnexpected(ConversionCode::POSITIVE_OVERFLOW);
       }
@@ -518,7 +535,7 @@ inline Expected<Tgt, ConversionCode> digits_to(
     return makeUnexpected(err);
   }
 
-  size_t size = e - b;
+  size_t size = size_t(e - b);
 
   /* Although the string is entirely made of digits, we still need to
    * check for overflow.
@@ -531,7 +548,7 @@ inline Expected<Tgt, ConversionCode> digits_to(
           return Tgt(0); // just zeros, e.g. "0000"
         }
         if (*b != '0') {
-          size = e - b;
+          size = size_t(e - b);
           break;
         }
       }
@@ -549,7 +566,7 @@ inline Expected<Tgt, ConversionCode> digits_to(
   UT result = 0;
 
   for (; e - b >= 4; b += 4) {
-    result *= 10000;
+    result *= static_cast<UT>(10000);
     const int32_t r0 = shift1000[static_cast<size_t>(b[0])];
     const int32_t r1 = shift100[static_cast<size_t>(b[1])];
     const int32_t r2 = shift10[static_cast<size_t>(b[2])];
@@ -558,7 +575,7 @@ inline Expected<Tgt, ConversionCode> digits_to(
     if (sum >= OOR) {
       goto outOfRange;
     }
-    result += sum;
+    result += UT(sum);
   }
 
   switch (e - b) {
@@ -570,7 +587,7 @@ inline Expected<Tgt, ConversionCode> digits_to(
     if (sum >= OOR) {
       goto outOfRange;
     }
-    result = 1000 * result + sum;
+    result = UT(1000 * result + sum);
     break;
   }
   case 2: {
@@ -580,7 +597,7 @@ inline Expected<Tgt, ConversionCode> digits_to(
     if (sum >= OOR) {
       goto outOfRange;
     }
-    result = 100 * result + sum;
+    result = UT(100 * result + sum);
     break;
   }
   case 1: {
@@ -588,7 +605,7 @@ inline Expected<Tgt, ConversionCode> digits_to(
     if (sum >= OOR) {
       goto outOfRange;
     }
-    result = 10 * result + sum;
+    result = UT(10 * result + sum);
     break;
   }
   default:
@@ -695,7 +712,7 @@ Expected<Tgt, ConversionCode> str_to_integral(StringPiece* src) noexcept {
   auto res = sgn.finalize(tmp.value());
 
   if (res.hasValue()) {
-    src->advance(m - src->data());
+    src->advance(size_t(m - src->data()));
   }
 
   return res;

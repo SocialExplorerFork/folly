@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Facebook, Inc.
+ * Copyright 2015-present Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,28 +14,38 @@
  * limitations under the License.
  */
 #pragma once
-#include <gmock/gmock.h>
 
 #include <folly/io/async/AsyncSSLSocket.h>
+#include <folly/portability/GMock.h>
 
 namespace folly { namespace test {
 
 class MockAsyncSSLSocket : public AsyncSSLSocket {
  public:
   MockAsyncSSLSocket(
-   const std::shared_ptr<SSLContext>& ctx,
-   EventBase* base,
-   bool deferSecurityNegotiation = false) :
-    AsyncSSLSocket(ctx, base, deferSecurityNegotiation) {
+      const std::shared_ptr<SSLContext>& ctx,
+      EventBase* base,
+      bool deferSecurityNegotiation = false)
+      : AsyncSocket(base),
+        AsyncSSLSocket(ctx, base, deferSecurityNegotiation) {}
+
+  MOCK_METHOD5(
+      connect_,
+      void(
+          AsyncSocket::ConnectCallback*,
+          const folly::SocketAddress&,
+          int,
+          const OptionMap&,
+          const folly::SocketAddress&));
+  void connect(
+      AsyncSocket::ConnectCallback* callback,
+      const folly::SocketAddress& address,
+      int timeout,
+      const OptionMap& options,
+      const folly::SocketAddress& bindAddr) noexcept override {
+    connect_(callback, address, timeout, options, bindAddr);
   }
 
-  GMOCK_METHOD5_(, noexcept, ,
-   connect,
-   void(AsyncSocket::ConnectCallback*,
-    const folly::SocketAddress&,
-    int,
-    const OptionMap&,
-    const folly::SocketAddress&));
   MOCK_CONST_METHOD1(getLocalAddress, void(folly::SocketAddress*));
   MOCK_CONST_METHOD1(getPeerAddress, void(folly::SocketAddress*));
   MOCK_METHOD0(closeNow, void());
@@ -50,16 +60,14 @@ class MockAsyncSSLSocket : public AsyncSSLSocket {
                      bool(const unsigned char**,
                           unsigned*,
                           SSLContext::NextProtocolType*));
-  MOCK_METHOD1(setPeek, void(bool));
   MOCK_METHOD1(setReadCB, void(ReadCallback*));
 
   void sslConn(
-    AsyncSSLSocket::HandshakeCB* cb,
-    uint64_t timeout,
-    const SSLContext::SSLVerifyPeerEnum& verify)
-      override {
-    if (timeout > 0) {
-      handshakeTimeout_.scheduleTimeout((uint32_t)timeout);
+      AsyncSSLSocket::HandshakeCB* cb,
+      std::chrono::milliseconds timeout,
+      const SSLContext::SSLVerifyPeerEnum& verify) override {
+    if (timeout > std::chrono::milliseconds::zero()) {
+      handshakeTimeout_.scheduleTimeout(timeout);
     }
 
     state_ = StateEnum::ESTABLISHED;
@@ -70,11 +78,10 @@ class MockAsyncSSLSocket : public AsyncSSLSocket {
   }
 
   void sslAccept(
-    AsyncSSLSocket::HandshakeCB* cb,
-    uint32_t timeout,
-    const SSLContext::SSLVerifyPeerEnum& verify)
-      override {
-    if (timeout > 0) {
+      AsyncSSLSocket::HandshakeCB* cb,
+      std::chrono::milliseconds timeout,
+      const SSLContext::SSLVerifyPeerEnum& verify) override {
+    if (timeout > std::chrono::milliseconds::zero()) {
       handshakeTimeout_.scheduleTimeout(timeout);
     }
 
@@ -86,14 +93,18 @@ class MockAsyncSSLSocket : public AsyncSSLSocket {
   }
 
   MOCK_METHOD3(
-   sslConnectMockable,
-   void(AsyncSSLSocket::HandshakeCB*, uint64_t,
-     const SSLContext::SSLVerifyPeerEnum&));
+      sslConnectMockable,
+      void(
+          AsyncSSLSocket::HandshakeCB*,
+          std::chrono::milliseconds,
+          const SSLContext::SSLVerifyPeerEnum&));
 
   MOCK_METHOD3(
-   sslAcceptMockable,
-   void(AsyncSSLSocket::HandshakeCB*, uint32_t,
-     const SSLContext::SSLVerifyPeerEnum&));
+      sslAcceptMockable,
+      void(
+          AsyncSSLSocket::HandshakeCB*,
+          std::chrono::milliseconds,
+          const SSLContext::SSLVerifyPeerEnum&));
 };
 
 }}

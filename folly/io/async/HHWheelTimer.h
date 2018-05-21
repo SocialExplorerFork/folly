@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Facebook, Inc.
+ * Copyright 2014-present Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -54,7 +54,6 @@ namespace folly {
 class HHWheelTimer : private folly::AsyncTimeout,
                      public folly::DelayedDestruction {
  public:
-  // This type has always been a misnomer, because it is not a unique pointer.
   using UniquePtr = std::unique_ptr<HHWheelTimer, Destructor>;
   using SharedPtr = std::shared_ptr<HHWheelTimer>;
 
@@ -70,10 +69,7 @@ class HHWheelTimer : private folly::AsyncTimeout,
       : public boost::intrusive::list_base_hook<
             boost::intrusive::link_mode<boost::intrusive::auto_unlink>> {
    public:
-    Callback()
-      : wheel_(nullptr)
-      , expiration_(0) {}
-
+    Callback() = default;
     virtual ~Callback();
 
     /**
@@ -108,32 +104,41 @@ class HHWheelTimer : private folly::AsyncTimeout,
       return wheel_ != nullptr;
     }
 
+    /**
+     * Get the time remaining until this timeout expires. Return 0 if this
+     * timeout is not scheduled or expired. Otherwise, return expiration time
+     * minus getCurTime().
+     */
+    std::chrono::milliseconds getTimeRemaining() {
+      return getTimeRemaining(getCurTime());
+    }
+
    protected:
     /**
      * Don't override this unless you're doing a test. This is mainly here so
      * that we can override it to simulate lag in steady_clock.
      */
-    virtual std::chrono::milliseconds getCurTime() {
-      return std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now().time_since_epoch());
+    virtual std::chrono::steady_clock::time_point getCurTime() {
+      return std::chrono::steady_clock::now();
     }
 
    private:
     // Get the time remaining until this timeout expires
     std::chrono::milliseconds getTimeRemaining(
-          std::chrono::milliseconds now) const {
+        std::chrono::steady_clock::time_point now) const {
       if (now >= expiration_) {
         return std::chrono::milliseconds(0);
       }
-      return expiration_ - now;
+      return std::chrono::duration_cast<std::chrono::milliseconds>(
+          expiration_ - now);
     }
 
     void setScheduled(HHWheelTimer* wheel,
                       std::chrono::milliseconds);
     void cancelTimeoutImpl();
 
-    HHWheelTimer* wheel_;
-    std::chrono::milliseconds expiration_;
+    HHWheelTimer* wheel_{nullptr};
+    std::chrono::steady_clock::time_point expiration_{};
     int bucket_{-1};
 
     typedef boost::intrusive::list<
@@ -257,7 +262,7 @@ class HHWheelTimer : private folly::AsyncTimeout,
    * Use destroy() instead.  See the comments in DelayedDestruction for more
    * details.
    */
-  virtual ~HHWheelTimer();
+  ~HHWheelTimer() override;
 
  private:
   // Forbidden copy constructor and assignment operator
@@ -265,7 +270,7 @@ class HHWheelTimer : private folly::AsyncTimeout,
   HHWheelTimer& operator=(HHWheelTimer const &) = delete;
 
   // Methods inherited from AsyncTimeout
-  virtual void timeoutExpired() noexcept;
+  void timeoutExpired() noexcept override;
 
   std::chrono::milliseconds interval_;
   std::chrono::milliseconds defaultTimeout_;
@@ -288,7 +293,7 @@ class HHWheelTimer : private folly::AsyncTimeout,
   int64_t lastTick_;
   int64_t expireTick_;
   uint64_t count_;
-  std::chrono::milliseconds startTime_;
+  std::chrono::steady_clock::time_point startTime_;
 
   int64_t calcNextTick();
 
@@ -297,10 +302,9 @@ class HHWheelTimer : private folly::AsyncTimeout,
   bool* processingCallbacksGuard_;
   CallbackList timeouts; // Timeouts queued to run
 
-  std::chrono::milliseconds getCurTime() {
-    return std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now().time_since_epoch());
+  std::chrono::steady_clock::time_point getCurTime() {
+    return std::chrono::steady_clock::now();
   }
 };
 
-} // folly
+} // namespace folly

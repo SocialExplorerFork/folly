@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Facebook, Inc.
+ * Copyright 2015-present Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,11 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <gtest/gtest.h>
-#include <gmock/gmock.h>
 
 #include <folly/io/async/AsyncTransport.h>
 #include <folly/io/async/WriteChainAsyncTransportWrapper.h>
+#include <folly/portability/GMock.h>
+#include <folly/portability/GTest.h>
 
 using namespace testing;
 using testing::_;
@@ -44,12 +44,11 @@ class TestWriteChainAsyncTransportWrapper :
   }
 
   // Allow this to be constructed on the stack for easier testing.
-  virtual ~TestWriteChainAsyncTransportWrapper() {
-  }
+  ~TestWriteChainAsyncTransportWrapper() override {}
 };
 
 MATCHER_P(BufMatches, expected, "") {
-  folly::IOBufEqual eq;
+  folly::IOBufEqualTo eq;
   return eq(*arg, *expected);
 }
 
@@ -83,4 +82,5 @@ TEST(WriteChainAsyncTransportWrapperTest, TestSimpleBuf) {
   transport.write(nullptr, buf->data(), buf->length());
 }
 
-}}
+} // namespace test
+} // namespace folly

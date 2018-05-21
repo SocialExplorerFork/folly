@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Facebook, Inc.
+ * Copyright 2013-present Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,15 +20,16 @@
 #include <thread>
 
 #include <glog/logging.h>
-#include <gtest/gtest.h>
 
+#include <folly/portability/GTest.h>
 #include <folly/portability/Sockets.h>
 
 using folly::ShutdownSocketSet;
 
 namespace fsp = folly::portability::sockets;
 
-namespace folly { namespace test {
+namespace folly {
+namespace test {
 
 ShutdownSocketSet shutdownSocketSet;
 
@@ -221,5 +222,5 @@ TEST(ShutdownSocketSetTest, OrderlyKill) {
 TEST(ShutdownSocketSetTest, AbortiveKill) {
   runKillTest(true);
 }
-
-}}  // namespaces
+} // namespace test
+} // namespace folly
