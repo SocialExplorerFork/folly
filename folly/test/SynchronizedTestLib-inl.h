@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Facebook, Inc.
+ * Copyright 2012-present Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,11 +16,10 @@
 
 #pragma once
 
-#include <gtest/gtest.h>
-
-#include <folly/Foreach.h>
 #include <folly/Random.h>
 #include <folly/Synchronized.h>
+#include <folly/container/Foreach.h>
+#include <folly/portability/GTest.h>
 #include <glog/logging.h>
 #include <algorithm>
 #include <condition_variable>
@@ -468,17 +467,10 @@ void testDeprecated() {
     EXPECT_EQ(1001, obj.size());
     EXPECT_EQ(10, obj.back());
     EXPECT_EQ(1000, obj2->size());
-
-    UNSYNCHRONIZED(obj) {
-      EXPECT_EQ(1001, obj->size());
-    }
   }
 
   SYNCHRONIZED_CONST (obj) {
     EXPECT_EQ(1001, obj.size());
-    UNSYNCHRONIZED(obj) {
-      EXPECT_EQ(1001, obj->size());
-    }
   }
 
   SYNCHRONIZED (lockedObj, *&obj) {
@@ -506,7 +498,7 @@ template <class Mutex> void testConcurrency() {
     // Test lock()
     for (size_t n = 0; n < itersPerThread; ++n) {
       v.contextualLock()->push_back((itersPerThread * threadIdx) + n);
-      sched_yield();
+      std::this_thread::yield();
     }
   };
   runParallel(numThreads, pushNumbers);
@@ -771,7 +763,7 @@ template <class Mutex> void testTimedSynchronized() {
     v->push_back(2 * threadIdx);
 
     // Aaand test the TIMED_SYNCHRONIZED macro
-    for (;;)
+    for (;;) {
       TIMED_SYNCHRONIZED(5, lv, v) {
         if (lv) {
           // Sleep for a random time to ensure we trigger timeouts
@@ -784,6 +776,7 @@ template <class Mutex> void testTimedSynchronized() {
 
         ++(*numTimeouts.contextualLock());
       }
+    }
   };
 
   static const size_t numThreads = 100;
@@ -881,10 +874,18 @@ struct NotCopiableNotMovable {
 };
 
 template <class Mutex> void testInPlaceConstruction() {
-  // This won't compile without construct_in_place
-  folly::Synchronized<NotCopiableNotMovable> a(
-    folly::construct_in_place, 5, "a"
-  );
+  // This won't compile without in_place
+  folly::Synchronized<NotCopiableNotMovable> a(folly::in_place, 5, "a");
 }
+
+template <class Mutex>
+void testExchange() {
+  std::vector<int> input = {1, 2, 3};
+  folly::Synchronized<std::vector<int>, Mutex> v(input);
+  std::vector<int> next = {4, 5, 6};
+  auto prev = v.exchange(std::move(next));
+  EXPECT_EQ((std::vector<int>{1, 2, 3}), prev);
+  EXPECT_EQ((std::vector<int>{4, 5, 6}), v.copy());
 }
-}
+} // namespace sync_tests
+} // namespace folly

@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Facebook, Inc.
+ * Copyright 2013-present Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,20 +22,21 @@
 #include <cinttypes>
 #include <cstddef>
 #include <cstring>
-#include <memory>
+#include <iterator>
 #include <limits>
+#include <memory>
 #include <type_traits>
 
-#include <boost/iterator/iterator_facade.hpp>
-
 #include <folly/FBString.h>
-#include <folly/Range.h>
 #include <folly/FBVector.h>
+#include <folly/Portability.h>
+#include <folly/Range.h>
+#include <folly/lang/Ordering.h>
 #include <folly/portability/SysUio.h>
 
 // Ignore shadowing warnings within this file, so includers can use -Wshadow.
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wshadow"
+FOLLY_PUSH_WARNING
+FOLLY_GNU_DISABLE_WARNING("-Wshadow")
 
 namespace folly {
 
@@ -210,14 +211,11 @@ namespace folly {
  */
 namespace detail {
 // Is T a unique_ptr<> to a standard-layout type?
-template <class T, class Enable=void> struct IsUniquePtrToSL
-  : public std::false_type { };
-template <class T, class D>
-struct IsUniquePtrToSL<
-  std::unique_ptr<T, D>,
-  typename std::enable_if<std::is_standard_layout<T>::value>::type>
-  : public std::true_type { };
-}  // namespace detail
+template <typename T>
+struct IsUniquePtrToSL : std::false_type {};
+template <typename T, typename D>
+struct IsUniquePtrToSL<std::unique_ptr<T, D>> : std::is_standard_layout<T> {};
+} // namespace detail
 
 class IOBuf {
  public:
@@ -507,7 +505,7 @@ class IOBuf {
    * Returns the number of bytes in the buffer before the start of the data.
    */
   uint64_t headroom() const {
-    return data_ - buffer();
+    return uint64_t(data_ - buffer());
   }
 
   /**
@@ -516,7 +514,7 @@ class IOBuf {
    * Returns the number of bytes in the buffer after the end of the data.
    */
   uint64_t tailroom() const {
-    return bufferEnd() - tail();
+    return uint64_t(bufferEnd() - tail());
   }
 
   /**
@@ -1124,6 +1122,26 @@ class IOBuf {
   IOBuf cloneOneAsValue() const;
 
   /**
+   * Return a new unchained IOBuf that may share the same data as this chain.
+   *
+   * If the IOBuf chain is not chained then the new IOBuf will point to the same
+   * underlying data buffer as the original chain. Otherwise, it will clone and
+   * coalesce the IOBuf chain.
+   *
+   * The new IOBuf will have at least as much headroom as the first IOBuf in the
+   * chain, and at least as much tailroom as the last IOBuf in the chain.
+   *
+   * Throws std::bad_alloc on error.
+   */
+  std::unique_ptr<IOBuf> cloneCoalesced() const;
+
+  /**
+   * Similar to cloneCoalesced(). But returns IOBuf by value rather than
+   * heap-allocating it.
+   */
+  IOBuf cloneCoalescedAsValue() const;
+
+  /**
    * Similar to Clone(). But use other as the head node. Other nodes in the
    * chain (if any) will be allocted on heap.
    */
@@ -1331,8 +1349,8 @@ class IOBuf {
   static inline uintptr_t packFlagsAndSharedInfo(uintptr_t flags,
                                                  SharedInfo* info) {
     uintptr_t uinfo = reinterpret_cast<uintptr_t>(info);
-    DCHECK_EQ(flags & ~kFlagMask, 0);
-    DCHECK_EQ(uinfo & kFlagMask, 0);
+    DCHECK_EQ(flags & ~kFlagMask, 0u);
+    DCHECK_EQ(uinfo & kFlagMask, 0u);
     return flags | uinfo;
   }
 
@@ -1342,7 +1360,7 @@ class IOBuf {
 
   inline void setSharedInfo(SharedInfo* info) {
     uintptr_t uinfo = reinterpret_cast<uintptr_t>(info);
-    DCHECK_EQ(uinfo & kFlagMask, 0);
+    DCHECK_EQ(uinfo & kFlagMask, 0u);
     flagsAndSharedInfo_ = (flagsAndSharedInfo_ & kFlagMask) | uinfo;
   }
 
@@ -1352,12 +1370,12 @@ class IOBuf {
 
   // flags_ are changed from const methods
   inline void setFlags(uintptr_t flags) const {
-    DCHECK_EQ(flags & ~kFlagMask, 0);
+    DCHECK_EQ(flags & ~kFlagMask, 0u);
     flagsAndSharedInfo_ |= flags;
   }
 
   inline void clearFlags(uintptr_t flags) const {
-    DCHECK_EQ(flags & ~kFlagMask, 0);
+    DCHECK_EQ(flags & ~kFlagMask, 0u);
     flagsAndSharedInfo_ &= ~flags;
   }
 
@@ -1376,7 +1394,7 @@ class IOBuf {
     typedef typename UniquePtr::deleter_type Deleter;
 
     explicit UniquePtrDeleter(Deleter deleter) : deleter_(std::move(deleter)){ }
-    void dispose(void* p) {
+    void dispose(void* p) override {
       try {
         deleter_(static_cast<Pointer>(p));
         delete this;
@@ -1405,21 +1423,52 @@ struct IOBufHash {
 };
 
 /**
- * Equality predicate for IOBuf objects. Compares data in the entire chain.
+ * Ordering for IOBuf objects. Compares data in the entire chain.
  */
-struct IOBufEqual {
-  bool operator()(const IOBuf& a, const IOBuf& b) const;
-  bool operator()(const std::unique_ptr<IOBuf>& a,
-                  const std::unique_ptr<IOBuf>& b) const {
-    if (!a && !b) {
-      return true;
-    } else if (!a || !b) {
-      return false;
-    } else {
-      return (*this)(*a, *b);
-    }
+struct IOBufCompare {
+  ordering operator()(const IOBuf& a, const IOBuf& b) const;
+  ordering operator()(
+      const std::unique_ptr<IOBuf>& a,
+      const std::unique_ptr<IOBuf>& b) const {
+    // clang-format off
+    return
+        !a && !b ? ordering::eq :
+        !a && b ? ordering::lt :
+        a && !b ? ordering::gt :
+        operator()(*a, *b);
+    // clang-format on
   }
 };
+
+/**
+ * Equality predicate for IOBuf objects. Compares data in the entire chain.
+ */
+struct IOBufEqualTo : compare_equal_to<IOBufCompare> {};
+
+/**
+ * Inequality predicate for IOBuf objects. Compares data in the entire chain.
+ */
+struct IOBufNotEqualTo : compare_not_equal_to<IOBufCompare> {};
+
+/**
+ * Less predicate for IOBuf objects. Compares data in the entire chain.
+ */
+struct IOBufLess : compare_less<IOBufCompare> {};
+
+/**
+ * At-most predicate for IOBuf objects. Compares data in the entire chain.
+ */
+struct IOBufLessEqual : compare_less_equal<IOBufCompare> {};
+
+/**
+ * Greater predicate for IOBuf objects. Compares data in the entire chain.
+ */
+struct IOBufGreater : compare_greater<IOBufCompare> {};
+
+/**
+ * At-least predicate for IOBuf objects. Compares data in the entire chain.
+ */
+struct IOBufGreaterEqual : compare_greater_equal<IOBufCompare> {};
 
 template <class UniquePtr>
 typename std::enable_if<detail::IsUniquePtrToSL<UniquePtr>::value,
@@ -1439,7 +1488,9 @@ inline std::unique_ptr<IOBuf> IOBuf::copyBuffer(
   uint64_t capacity = headroom + size + minTailroom;
   std::unique_ptr<IOBuf> buf = create(capacity);
   buf->advance(headroom);
-  memcpy(buf->writableData(), data, size);
+  if (size != 0) {
+    memcpy(buf->writableData(), data, size);
+  }
   buf->append(size);
   return buf;
 }
@@ -1459,13 +1510,14 @@ inline std::unique_ptr<IOBuf> IOBuf::maybeCopyBuffer(const std::string& buf,
   return copyBuffer(buf.data(), buf.size(), headroom, minTailroom);
 }
 
-class IOBuf::Iterator : public boost::iterator_facade<
-    IOBuf::Iterator,  // Derived
-    const ByteRange,  // Value
-    boost::forward_traversal_tag  // Category or traversal
-  > {
-  friend class boost::iterator_core_access;
+class IOBuf::Iterator {
  public:
+  using difference_type = ssize_t;
+  using value_type = ByteRange;
+  using reference = ByteRange const&;
+  using pointer = ByteRange const*;
+  using iterator_category = std::forward_iterator_tag;
+
   // Note that IOBufs are stored as a circular list without a guard node,
   // so pos == end is ambiguous (it may mean "begin" or "end").  To solve
   // the ambiguity (at the cost of one extra comparison in the "increment"
@@ -1478,6 +1530,46 @@ class IOBuf::Iterator : public boost::iterator_facade<
     if (pos_) {
       setVal();
     }
+  }
+
+  Iterator() {}
+
+  Iterator(Iterator const& rhs) : Iterator(rhs.pos_, rhs.end_) {}
+
+  Iterator& operator=(Iterator const& rhs) {
+    pos_ = rhs.pos_;
+    end_ = rhs.end_;
+    if (pos_) {
+      setVal();
+    }
+    return *this;
+  }
+
+  Iterator& operator++() {
+    increment();
+    return *this;
+  }
+
+  Iterator operator++(int) {
+    Iterator ret(*this);
+    ++*this;
+    return ret;
+  }
+
+  ByteRange const& operator*() const {
+    return dereference();
+  }
+
+  ByteRange const* operator->() const {
+    return &dereference();
+  }
+
+  bool operator==(Iterator const& rhs) const {
+    return equal(rhs);
+  }
+
+  bool operator!=(Iterator const& rhs) const {
+    return !equal(rhs);
   }
 
  private:
@@ -1510,14 +1602,14 @@ class IOBuf::Iterator : public boost::iterator_facade<
     adjustForEnd();
   }
 
-  const IOBuf* pos_;
-  const IOBuf* end_;
+  const IOBuf* pos_{nullptr};
+  const IOBuf* end_{nullptr};
   ByteRange val_;
 };
 
 inline IOBuf::Iterator IOBuf::begin() const { return cbegin(); }
 inline IOBuf::Iterator IOBuf::end() const { return cend(); }
 
-} // folly
+} // namespace folly
 
-#pragma GCC diagnostic pop
+FOLLY_POP_WARNING

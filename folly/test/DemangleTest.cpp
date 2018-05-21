@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Facebook, Inc.
+ * Copyright 2015-present Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,14 +16,14 @@
 
 #include <folly/Demangle.h>
 
-#include <gtest/gtest.h>
+#include <folly/portability/GTest.h>
 
 using folly::demangle;
 
 namespace folly_test {
 struct ThisIsAVeryLongStructureName {
 };
-}  // namespace folly_test
+} // namespace folly_test
 
 #if FOLLY_HAVE_CPLUS_DEMANGLE_V3_CALLBACK
 TEST(Demangle, demangle) {

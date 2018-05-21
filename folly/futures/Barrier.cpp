@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Facebook, Inc.
+ * Copyright 2015-present Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  */
 
 #include <folly/futures/Barrier.h>
+#include <folly/lang/Exception.h>
 
 namespace folly { namespace futures {
 
@@ -25,7 +26,7 @@ Barrier::Barrier(uint32_t n)
 Barrier::~Barrier() {
   auto block = controlBlock_.load(std::memory_order_relaxed);
   auto prev = block->valueAndReaderCount.load(std::memory_order_relaxed);
-  DCHECK_EQ(prev >> kReaderShift, 0);
+  DCHECK_EQ(prev >> kReaderShift, 0u);
   auto val = prev & kValueMask;
   auto p = promises(block);
 
@@ -40,7 +41,7 @@ Barrier::~Barrier() {
 auto Barrier::allocateControlBlock() -> ControlBlock* {
   auto block = static_cast<ControlBlock*>(malloc(controlBlockSize(size_)));
   if (!block) {
-    throw std::bad_alloc();
+    throw_exception<std::bad_alloc>();
   }
   block->valueAndReaderCount = 0;
 
@@ -105,4 +106,5 @@ folly::Future<bool> Barrier::wait() {
   return future;
 }
 
-}}  // namespaces
+} // namespace futures
+} // namespace folly

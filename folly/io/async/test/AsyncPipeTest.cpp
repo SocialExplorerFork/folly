@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Facebook, Inc.
+ * Copyright 2014-present Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,10 +14,10 @@
  * limitations under the License.
  */
 
+#include <folly/Memory.h>
 #include <folly/io/async/AsyncPipe.h>
 #include <folly/io/async/EventBase.h>
-#include <folly/Memory.h>
-#include <gtest/gtest.h>
+#include <folly/portability/GTest.h>
 
 #include <fcntl.h>
 
@@ -124,8 +124,7 @@ std::unique_ptr<folly::IOBuf> getBuf(const std::string& data) {
   return buf;
 }
 
-} // anonymous namespace
-
+} // namespace
 
 TEST_F(AsyncPipeTest, simple) {
   for (int pass = 0; pass < 2; ++pass) {

@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Facebook, Inc.
+ * Copyright 2013-present Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,17 +20,18 @@
 #include <cstddef>
 
 #include <boost/random.hpp>
-#include <gtest/gtest.h>
 
-#include <folly/Malloc.h>
 #include <folly/Range.h>
+#include <folly/memory/Malloc.h>
+#include <folly/portability/GTest.h>
 
+using folly::ByteRange;
 using folly::fbstring;
 using folly::fbvector;
 using folly::IOBuf;
-using folly::TypedIOBuf;
+using folly::ordering;
 using folly::StringPiece;
-using folly::ByteRange;
+using folly::TypedIOBuf;
 using std::unique_ptr;
 
 void append(std::unique_ptr<IOBuf>& buf, StringPiece str) {
@@ -531,6 +532,15 @@ TEST(IOBuf, Chaining) {
   gen.seed(fillSeed);
   checkChain(chainClone.get(), gen);
 
+  // cloneCoalesced
+  {
+    auto chainCloneCoalesced = chainClone->cloneCoalesced();
+    EXPECT_EQ(1, chainCloneCoalesced->countChainElements());
+    EXPECT_EQ(fullLength, chainCloneCoalesced->computeChainDataLength());
+    gen.seed(fillSeed);
+    checkChain(chainCloneCoalesced.get(), gen);
+  }
+
   // Coalesce the entire chain
   chainClone->coalesce();
   EXPECT_EQ(1, chainClone->countChainElements());
@@ -589,7 +599,7 @@ void testFreeFn(void* buffer, void* ptr) {
   if (freeCount) {
     ++(*freeCount);
   }
-};
+}
 
 TEST(IOBuf, Reserve) {
   uint32_t fillSeed = 0x23456789;
@@ -717,6 +727,11 @@ TEST(IOBuf, maybeCopyBuffer) {
   EXPECT_EQ(nullptr, buf.get());
 }
 
+TEST(IOBuf, copyEmptyBuffer) {
+  auto buf = IOBuf::copyBuffer(nullptr, 0);
+  EXPECT_EQ(buf->length(), 0);
+}
+
 namespace {
 
 int customDeleterCount = 0;
@@ -741,7 +756,7 @@ void customDeleteArray(OwnershipTestClass* p) {
   delete[] p;
 }
 
-}  // namespace
+} // namespace
 
 TEST(IOBuf, takeOwnershipUniquePtr) {
   destructorCount = 0;
@@ -834,13 +849,13 @@ enum BufType {
 
 // chain element size, number of elements in chain, shared
 class MoveToFbStringTest
-  : public ::testing::TestWithParam<std::tr1::tuple<int, int, bool, BufType>> {
+    : public ::testing::TestWithParam<std::tuple<int, int, bool, BufType>> {
  protected:
   void SetUp() override {
-    elementSize_ = std::tr1::get<0>(GetParam());
-    elementCount_ = std::tr1::get<1>(GetParam());
-    shared_ = std::tr1::get<2>(GetParam());
-    type_ = std::tr1::get<3>(GetParam());
+    elementSize_ = std::get<0>(GetParam());
+    elementCount_ = std::get<1>(GetParam());
+    shared_ = std::get<2>(GetParam());
+    type_ = std::get<3>(GetParam());
 
     buf_ = makeBuf();
     for (int i = 0; i < elementCount_ - 1; ++i) {
@@ -883,7 +898,6 @@ class MoveToFbStringTest
       }
       default:
         throw std::invalid_argument("unexpected buffer type parameter");
-        break;
     }
     memset(buf->writableData(), 'x', elementSize_);
     return buf;
@@ -1028,10 +1042,18 @@ namespace {
 std::unique_ptr<IOBuf> fromStr(StringPiece sp) {
   return IOBuf::copyBuffer(ByteRange(sp));
 }
-}  // namespace
+
+std::unique_ptr<IOBuf> seq(std::initializer_list<StringPiece> sps) {
+  auto ret = IOBuf::create(0);
+  for (auto sp : sps) {
+    ret->prependChain(IOBuf::copyBuffer(ByteRange(sp)));
+  }
+  return ret;
+}
+} // namespace
 
 TEST(IOBuf, HashAndEqual) {
-  folly::IOBufEqual eq;
+  folly::IOBufEqualTo eq;
   folly::IOBufHash hash;
 
   EXPECT_TRUE(eq(nullptr, nullptr));
@@ -1083,6 +1105,30 @@ TEST(IOBuf, HashAndEqual) {
 
   EXPECT_TRUE(eq(e, f));
   EXPECT_EQ(hash(e), hash(f));
+}
+
+TEST(IOBuf, IOBufCompare) {
+  folly::IOBufCompare op;
+  auto n = std::unique_ptr<IOBuf>{};
+  auto e = IOBuf::create(0);
+  auto hello1 = seq({"hello"});
+  auto hello2 = seq({"hel", "lo"});
+  auto hello3 = seq({"he", "ll", "o"});
+  auto hellow = seq({"hellow"});
+  auto hellox = seq({"hellox"});
+
+  EXPECT_EQ(ordering::eq, op(n, n));
+  EXPECT_EQ(ordering::lt, op(n, e));
+  EXPECT_EQ(ordering::gt, op(e, n));
+  EXPECT_EQ(ordering::lt, op(e, hello1));
+  EXPECT_EQ(ordering::gt, op(hello1, e));
+  EXPECT_EQ(ordering::eq, op(hello1, hello1));
+  EXPECT_EQ(ordering::eq, op(hello1, hello2));
+  EXPECT_EQ(ordering::eq, op(hello1, hello3));
+  EXPECT_EQ(ordering::lt, op(hello1, hellow));
+  EXPECT_EQ(ordering::gt, op(hellow, hello1));
+  EXPECT_EQ(ordering::lt, op(hellow, hellox));
+  EXPECT_EQ(ordering::gt, op(hellox, hellow));
 }
 
 // reserveSlow() had a bug when reallocating the buffer in place. It would
@@ -1227,7 +1273,7 @@ char* writableStr(folly::IOBuf& buf) {
   return reinterpret_cast<char*>(buf.writableData());
 }
 
-}  // namespace
+} // namespace
 
 TEST(IOBuf, ExternallyShared) {
   struct Item {
@@ -1245,8 +1291,8 @@ TEST(IOBuf, ExternallyShared) {
 
   {
     auto freeFn = [](void* /* unused */, void* userData) {
-      auto it = static_cast<struct Item*>(userData);
-      it->refcount--;
+      auto it2 = static_cast<struct Item*>(userData);
+      it2->refcount--;
     };
     it.refcount++;
     auto buf1 = IOBuf::takeOwnership(it.buffer, it.size, freeFn, &it);
@@ -1325,4 +1371,59 @@ TEST(IOBuf, Managed) {
   writableStr(*buf1)[0] = 'j';
   writableStr(*buf2)[0] = 'x';
   EXPECT_EQ("jelloxorldhelloxorld", toString(*buf1));
+}
+
+TEST(IOBuf, CoalesceEmptyBuffers) {
+  auto b1 = IOBuf::takeOwnership(nullptr, 0);
+  auto b2 = fromStr("hello");
+  auto b3 = IOBuf::takeOwnership(nullptr, 0);
+
+  b2->appendChain(std::move(b3));
+  b1->appendChain(std::move(b2));
+
+  auto br = b1->coalesce();
+
+  EXPECT_TRUE(ByteRange(StringPiece("hello")) == br);
+}
+
+TEST(IOBuf, CloneCoalescedChain) {
+  auto b = IOBuf::createChain(1000, 100);
+  b->advance(10);
+  const uint32_t fillSeed = 0x12345678;
+  boost::mt19937 gen(fillSeed);
+  {
+    auto c = b.get();
+    uint64_t length = c->tailroom();
+    do {
+      length = std::min(length, c->tailroom());
+      c->append(length--);
+      fillBuf(c, gen);
+      c = c->next();
+    } while (c != b.get());
+  }
+  auto c = b->cloneCoalescedAsValue();
+  EXPECT_FALSE(c.isChained()); // Not chained
+  EXPECT_FALSE(c.isSharedOne()); // Not shared
+  EXPECT_EQ(b->headroom(), c.headroom()); // Preserves headroom
+  EXPECT_LE(b->prev()->tailroom(), c.tailroom()); // Preserves minimum tailroom
+  EXPECT_EQ(b->computeChainDataLength(), c.length()); // Same length
+  gen.seed(fillSeed);
+  checkBuf(&c, gen); // Same contents
+}
+
+TEST(IOBuf, CloneCoalescedSingle) {
+  auto b = IOBuf::create(1000);
+  b->advance(10);
+  b->append(900);
+  const uint32_t fillSeed = 0x12345678;
+  boost::mt19937 gen(fillSeed);
+  fillBuf(b.get(), gen);
+
+  auto c = b->cloneCoalesced();
+  EXPECT_FALSE(c->isChained()); // Not chained
+  EXPECT_TRUE(c->isSharedOne()); // Shared
+  EXPECT_EQ(b->buffer(), c->buffer());
+  EXPECT_EQ(b->capacity(), c->capacity());
+  EXPECT_EQ(b->data(), c->data());
+  EXPECT_EQ(b->length(), c->length());
 }

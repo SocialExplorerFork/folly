@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Facebook, Inc.
+ * Copyright 2011-present Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,21 +13,24 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 // @author: Andrei Alexandrescu (aalexandre)
 
 // Test bed for folly/Synchronized.h
 
+#include <folly/Synchronized.h>
+#include <folly/Function.h>
 #include <folly/LockTraitsBoost.h>
 #include <folly/Portability.h>
-#include <folly/RWSpinLock.h>
+#include <folly/ScopeGuard.h>
 #include <folly/SharedMutex.h>
 #include <folly/SpinLock.h>
-#include <folly/Synchronized.h>
+#include <folly/portability/GTest.h>
+#include <folly/synchronization/RWSpinLock.h>
 #include <folly/test/SynchronizedTestLib.h>
-#include <gtest/gtest.h>
 
 using namespace folly::sync_tests;
+
+namespace folly {
 
 template <class Mutex>
 class SynchronizedTest : public testing::Test {};
@@ -95,6 +98,14 @@ TYPED_TEST(SynchronizedTest, ConstCopy) {
   testConstCopy<TypeParam>();
 }
 
+TYPED_TEST(SynchronizedTest, InPlaceConstruction) {
+  testInPlaceConstruction<TypeParam>();
+}
+
+TYPED_TEST(SynchronizedTest, Exchange) {
+  testExchange<TypeParam>();
+}
+
 template <class Mutex>
 class SynchronizedTimedTest : public testing::Test {};
 
@@ -144,10 +155,6 @@ TYPED_TEST(SynchronizedTimedWithConstTest, TimedShared) {
 
 TYPED_TEST(SynchronizedTimedWithConstTest, TimedSynchronizeWithConst) {
   testTimedSynchronizedWithConst<TypeParam>();
-}
-
-TYPED_TEST(SynchronizedTest, InPlaceConstruction) {
-  testInPlaceConstruction<TypeParam>();
 }
 
 using CountPair = std::pair<int, int>;
@@ -330,69 +337,40 @@ class FakeAllPowerfulAssertingMutex {
   }
 };
 
-// Single level of SYNCHRONIZED and UNSYNCHRONIZED, although nested test are
-// super set of it, it is possible single level test passes while nested tests
-// fail
-TEST_F(SynchronizedLockTest, SyncUnSync) {
-  folly::Synchronized<std::vector<int>, FakeMutex> obj;
-  EXPECT_EQ((CountPair{0, 0}), FakeMutex::getLockUnlockCount());
-  SYNCHRONIZED(obj) {
-    EXPECT_EQ((CountPair{1, 0}), FakeMutex::getLockUnlockCount());
-    UNSYNCHRONIZED(obj) {
-      EXPECT_EQ((CountPair{1, 1}), FakeMutex::getLockUnlockCount());
-    }
-    EXPECT_EQ((CountPair{2, 1}), FakeMutex::getLockUnlockCount());
+class NonDefaultConstructibleMutex {
+ public:
+  explicit NonDefaultConstructibleMutex(int valueIn) {
+    value = valueIn;
   }
-  EXPECT_EQ((CountPair{2, 2}), FakeMutex::getLockUnlockCount());
-}
+  NonDefaultConstructibleMutex() = delete;
+  NonDefaultConstructibleMutex(const NonDefaultConstructibleMutex&) = delete;
+  NonDefaultConstructibleMutex(NonDefaultConstructibleMutex&&) = delete;
+  NonDefaultConstructibleMutex& operator=(const NonDefaultConstructibleMutex&) =
+      delete;
+  NonDefaultConstructibleMutex& operator=(NonDefaultConstructibleMutex&&) =
+      delete;
 
-// Nested SYNCHRONIZED UNSYNCHRONIZED test, 2 levels of synchronization
-TEST_F(SynchronizedLockTest, NestedSyncUnSync) {
-  folly::Synchronized<std::vector<int>, FakeMutex> obj;
-  EXPECT_EQ((CountPair{0, 0}), FakeMutex::getLockUnlockCount());
-  SYNCHRONIZED(objCopy, obj) {
-    EXPECT_EQ((CountPair{1, 0}), FakeMutex::getLockUnlockCount());
-    SYNCHRONIZED(obj) {
-      EXPECT_EQ((CountPair{2, 0}), FakeMutex::getLockUnlockCount());
-      // Note: UNSYNCHRONIZED has always been kind of broken here.
-      // The input parameter is ignored (other than to overwrite what the input
-      // variable name refers to), and it unlocks the most object acquired in
-      // the most recent SYNCHRONIZED scope.
-      UNSYNCHRONIZED(obj) {
-        EXPECT_EQ((CountPair{2, 1}), FakeMutex::getLockUnlockCount());
-      }
-      EXPECT_EQ((CountPair{3, 1}), FakeMutex::getLockUnlockCount());
-      UNSYNCHRONIZED(obj) {
-        EXPECT_EQ((CountPair{3, 2}), FakeMutex::getLockUnlockCount());
-      }
-      EXPECT_EQ((CountPair{4, 2}), FakeMutex::getLockUnlockCount());
-    }
-    EXPECT_EQ((CountPair{4, 3}), FakeMutex::getLockUnlockCount());
-  }
-  EXPECT_EQ((CountPair{4, 4}), FakeMutex::getLockUnlockCount());
-}
+  static int value;
 
-// Different nesting behavior, UNSYNCHRONIZED called on different depth of
-// SYNCHRONIZED
-TEST_F(SynchronizedLockTest, NestedSyncUnSync2) {
-  folly::Synchronized<std::vector<int>, FakeMutex> obj;
-  EXPECT_EQ((CountPair{0, 0}), FakeMutex::getLockUnlockCount());
-  SYNCHRONIZED(objCopy, obj) {
-    EXPECT_EQ((CountPair{1, 0}), FakeMutex::getLockUnlockCount());
-    SYNCHRONIZED(obj) {
-      EXPECT_EQ((CountPair{2, 0}), FakeMutex::getLockUnlockCount());
-      UNSYNCHRONIZED(obj) {
-        EXPECT_EQ((CountPair{2, 1}), FakeMutex::getLockUnlockCount());
-      }
-      EXPECT_EQ((CountPair{3, 1}), FakeMutex::getLockUnlockCount());
-    }
-    EXPECT_EQ((CountPair{3, 2}), FakeMutex::getLockUnlockCount());
-    UNSYNCHRONIZED(obj) {
-      EXPECT_EQ((CountPair{3, 3}), FakeMutex::getLockUnlockCount());
-    }
-    EXPECT_EQ((CountPair{4, 3}), FakeMutex::getLockUnlockCount());
-  }
-  EXPECT_EQ((CountPair{4, 4}), FakeMutex::getLockUnlockCount());
+  void lock() {}
+  void unlock() {}
+};
+int NonDefaultConstructibleMutex::value{0};
+
+TEST_F(SynchronizedLockTest, TestCopyConstructibleValues) {
+  struct NonCopyConstructible {
+    NonCopyConstructible(const NonCopyConstructible&) = delete;
+    NonCopyConstructible& operator=(const NonCopyConstructible&) = delete;
+  };
+  struct CopyConstructible {};
+  EXPECT_FALSE(std::is_copy_constructible<
+               folly::Synchronized<NonCopyConstructible>>::value);
+  EXPECT_FALSE(std::is_copy_assignable<
+               folly::Synchronized<NonCopyConstructible>>::value);
+  EXPECT_TRUE(std::is_copy_constructible<
+              folly::Synchronized<CopyConstructible>>::value);
+  EXPECT_TRUE(
+      std::is_copy_assignable<folly::Synchronized<CopyConstructible>>::value);
 }
 
 TEST_F(SynchronizedLockTest, UpgradableLocking) {
@@ -433,7 +411,7 @@ TEST_F(SynchronizedLockTest, UpgradableLocking) {
   // test going from upgrade to shared
   {
     auto ulock = sync.ulock();
-    auto slock = ulock.moveFromUpgradeToShared();
+    auto slock = ulock.moveFromUpgradeToRead();
     EXPECT_EQ(static_cast<bool>(ulock), false);
     EXPECT_EQ(
         globalAllPowerfulAssertingMutex.lock_state,
@@ -463,7 +441,7 @@ TEST_F(SynchronizedLockTest, UpgradableLocking) {
   // test going from exclusive to shared
   {
     auto wlock = sync.wlock();
-    auto slock = wlock.moveFromWriteToShared();
+    auto slock = wlock.moveFromWriteToRead();
     EXPECT_EQ(static_cast<bool>(wlock), false);
     EXPECT_EQ(
         globalAllPowerfulAssertingMutex.lock_state,
@@ -529,7 +507,7 @@ TEST_F(SynchronizedLockTest, UpgradableLockingWithULock) {
         globalAllPowerfulAssertingMutex.lock_state,
         FakeAllPowerfulAssertingMutexInternal::CurrentLockState::UPGRADE);
 
-    auto slock = ulock.moveFromUpgradeToShared();
+    auto slock = ulock.moveFromUpgradeToRead();
     EXPECT_EQ(static_cast<bool>(ulock), false);
     EXPECT_EQ(
         globalAllPowerfulAssertingMutex.lock_state,
@@ -548,7 +526,7 @@ TEST_F(SynchronizedLockTest, UpgradableLockingWithULock) {
         globalAllPowerfulAssertingMutex.lock_state,
         FakeAllPowerfulAssertingMutexInternal::CurrentLockState::UNIQUE);
 
-    auto slock = wlock.moveFromWriteToShared();
+    auto slock = wlock.moveFromWriteToRead();
     EXPECT_EQ(static_cast<bool>(wlock), false);
     EXPECT_EQ(
         globalAllPowerfulAssertingMutex.lock_state,
@@ -560,3 +538,411 @@ TEST_F(SynchronizedLockTest, UpgradableLockingWithULock) {
       globalAllPowerfulAssertingMutex.lock_state,
       FakeAllPowerfulAssertingMutexInternal::CurrentLockState::UNLOCKED);
 }
+
+TEST_F(SynchronizedLockTest, TestPieceWiseConstruct) {
+  auto&& synchronized = folly::Synchronized<int, NonDefaultConstructibleMutex>{
+      std::piecewise_construct,
+      std::forward_as_tuple(3),
+      std::forward_as_tuple(1)};
+
+  EXPECT_EQ(*synchronized.lock(), 3);
+  EXPECT_EQ(NonDefaultConstructibleMutex::value, 1);
+}
+
+namespace {
+constexpr auto kLockable = 1;
+constexpr auto kWLockable = 2;
+constexpr auto kRLockable = 4;
+constexpr auto kULockable = 8;
+
+template <int kLockableType>
+class TryLockable {
+ public:
+  explicit TryLockable(
+      bool shouldSucceed,
+      folly::Function<void()> onLockIn,
+      folly::Function<void()> onUnlockIn)
+      : kShouldSucceed{shouldSucceed},
+        onLock{std::move(onLockIn)},
+        onUnlock{std::move(onUnlockIn)} {}
+
+  void lock() {
+    EXPECT_TRUE(false);
+  }
+  template <
+      int LockableType = kLockableType,
+      std::enable_if_t<LockableType != kLockable>* = nullptr>
+  void lock_shared() {
+    EXPECT_TRUE(false);
+  }
+  template <
+      int LockableType = kLockableType,
+      std::enable_if_t<LockableType == kULockable>* = nullptr>
+  void lock_upgrade() {
+    EXPECT_TRUE(false);
+  }
+
+  bool tryLockImpl(int lockableMask) {
+    // if the lockable type of this instance is one of the possible options as
+    // expressed in the mask go through the usual test code
+    if (kLockableType | lockableMask) {
+      if (kShouldSucceed) {
+        onLock();
+        return true;
+      } else {
+        return false;
+      }
+    }
+
+    // else fail the test
+    EXPECT_TRUE(false);
+    return false;
+  }
+  void unlockImpl(int lockableMask) {
+    if (kLockableType | lockableMask) {
+      onUnlock();
+      return;
+    }
+
+    EXPECT_TRUE(false);
+  }
+
+  bool try_lock() {
+    return tryLockImpl(kLockable | kWLockable);
+  }
+  bool try_lock_shared() {
+    return tryLockImpl(kRLockable);
+  }
+  bool try_lock_upgrade() {
+    return tryLockImpl(kULockable);
+  }
+
+  void unlock() {
+    unlockImpl(kLockable | kWLockable);
+  }
+  void unlock_shared() {
+    unlockImpl(kLockable | kRLockable);
+  }
+  void unlock_upgrade() {
+    unlockImpl(kLockable | kULockable);
+  }
+
+  const bool kShouldSucceed;
+  folly::Function<void()> onLock;
+  folly::Function<void()> onUnlock;
+};
+
+template <int kLockable, typename Func>
+void testTryLock(Func func) {
+  {
+    auto locked = 0;
+    auto unlocked = 0;
+    folly::Synchronized<int, TryLockable<kLockable>> synchronized{
+        std::piecewise_construct,
+        std::make_tuple(),
+        std::make_tuple(true, [&] { ++locked; }, [&] { ++unlocked; })};
+
+    {
+      auto lock = func(synchronized);
+      EXPECT_TRUE(lock);
+      EXPECT_EQ(locked, 1);
+    }
+    EXPECT_EQ(locked, 1);
+    EXPECT_EQ(unlocked, 1);
+  }
+  {
+    auto locked = 0;
+    auto unlocked = 0;
+    folly::Synchronized<int, TryLockable<kLockable>> synchronized{
+        std::piecewise_construct,
+        std::make_tuple(),
+        std::make_tuple(false, [&] { ++locked; }, [&] { ++unlocked; })};
+
+    {
+      auto lock = func(synchronized);
+      EXPECT_FALSE(lock);
+      EXPECT_EQ(locked, 0);
+    }
+    EXPECT_EQ(locked, 0);
+    EXPECT_EQ(unlocked, 0);
+  }
+}
+
+class MutexTrack {
+ public:
+  static int gId;
+  static int gOrder;
+
+  void lock_shared() {}
+  void unlock_shared() {}
+  void lock() {
+    order = MutexTrack::gOrder++;
+  }
+  void unlock() {
+    order = -1;
+    --gOrder;
+  }
+
+  int current{gId++};
+  int order{-1};
+};
+int MutexTrack::gId{0};
+int MutexTrack::gOrder{0};
+} // namespace
+
+TEST_F(SynchronizedLockTest, TestTryLock) {
+  testTryLock<kLockable>(
+      [](auto& synchronized) { return synchronized.tryLock(); });
+}
+
+TEST_F(SynchronizedLockTest, TestTryWLock) {
+  testTryLock<kWLockable>(
+      [](auto& synchronized) { return synchronized.tryWLock(); });
+}
+
+TEST_F(SynchronizedLockTest, TestTryRLock) {
+  testTryLock<kRLockable>(
+      [](auto& synchronized) { return synchronized.tryRLock(); });
+}
+
+TEST_F(SynchronizedLockTest, TestTryULock) {
+  testTryLock<kULockable>(
+      [](auto& synchronized) { return synchronized.tryULock(); });
+}
+
+template <typename LockPolicy>
+using LPtr = LockedPtr<Synchronized<int>, LockPolicy>;
+
+TEST_F(SynchronizedLockTest, TestLockedPtrCompatibilityExclusive) {
+  EXPECT_TRUE((std::is_assignable<
+               LPtr<LockPolicyExclusive>&,
+               LPtr<LockPolicyTryExclusive>&&>::value));
+  EXPECT_TRUE((std::is_assignable<
+               LPtr<LockPolicyExclusive>&,
+               LPtr<LockPolicyFromUpgradeToExclusive>&&>::value));
+
+  EXPECT_FALSE((
+      std::is_assignable<LPtr<LockPolicyExclusive>&, LPtr<LockPolicyShared>&&>::
+          value));
+  EXPECT_FALSE((std::is_assignable<
+                LPtr<LockPolicyExclusive>&,
+                LPtr<LockPolicyTryShared>&&>::value));
+  EXPECT_FALSE((std::is_assignable<
+                LPtr<LockPolicyExclusive>&,
+                LPtr<LockPolicyUpgrade>&&>::value));
+  EXPECT_FALSE((std::is_assignable<
+                LPtr<LockPolicyExclusive>&,
+                LPtr<LockPolicyTryUpgrade>&&>::value));
+  EXPECT_FALSE((std::is_assignable<
+                LPtr<LockPolicyExclusive>&,
+                LPtr<LockPolicyFromExclusiveToUpgrade>&&>::value));
+  EXPECT_FALSE((std::is_assignable<
+                LPtr<LockPolicyExclusive>&,
+                LPtr<LockPolicyFromExclusiveToShared>&&>::value));
+  EXPECT_FALSE((std::is_assignable<
+                LPtr<LockPolicyExclusive>&,
+                LPtr<LockPolicyFromUpgradeToShared>&&>::value));
+}
+
+TEST_F(SynchronizedLockTest, TestLockedPtrCompatibilityShared) {
+  EXPECT_TRUE((
+      std::is_assignable<LPtr<LockPolicyShared>&, LPtr<LockPolicyTryShared>&&>::
+          value));
+  EXPECT_TRUE((std::is_assignable<
+               LPtr<LockPolicyShared>&,
+               LPtr<LockPolicyFromUpgradeToShared>&&>::value));
+  EXPECT_TRUE((std::is_assignable<
+               LPtr<LockPolicyShared>&,
+               LPtr<LockPolicyFromExclusiveToShared>&&>::value));
+
+  EXPECT_FALSE((
+      std::is_assignable<LPtr<LockPolicyShared>&, LPtr<LockPolicyExclusive>&&>::
+          value));
+  EXPECT_FALSE((std::is_assignable<
+                LPtr<LockPolicyShared>&,
+                LPtr<LockPolicyTryExclusive>&&>::value));
+  EXPECT_FALSE(
+      (std::is_assignable<LPtr<LockPolicyShared>&, LPtr<LockPolicyUpgrade>&&>::
+           value));
+  EXPECT_FALSE((std::is_assignable<
+                LPtr<LockPolicyShared>&,
+                LPtr<LockPolicyTryUpgrade>&&>::value));
+  EXPECT_FALSE((std::is_assignable<
+                LPtr<LockPolicyShared>&,
+                LPtr<LockPolicyFromExclusiveToUpgrade>&&>::value));
+  EXPECT_FALSE((std::is_assignable<
+                LPtr<LockPolicyShared>&,
+                LPtr<LockPolicyFromUpgradeToExclusive>&&>::value));
+}
+
+TEST_F(SynchronizedLockTest, TestLockedPtrCompatibilityUpgrade) {
+  EXPECT_TRUE((std::is_assignable<
+               LPtr<LockPolicyUpgrade>&,
+               LPtr<LockPolicyTryUpgrade>&&>::value));
+  EXPECT_TRUE((std::is_assignable<
+               LPtr<LockPolicyUpgrade>&,
+               LPtr<LockPolicyFromExclusiveToUpgrade>&&>::value));
+
+  EXPECT_FALSE((std::is_assignable<
+                LPtr<LockPolicyUpgrade>&,
+                LPtr<LockPolicyExclusive>&&>::value));
+  EXPECT_FALSE((std::is_assignable<
+                LPtr<LockPolicyUpgrade>&,
+                LPtr<LockPolicyTryExclusive>&&>::value));
+  EXPECT_FALSE(
+      (std::is_assignable<LPtr<LockPolicyUpgrade>&, LPtr<LockPolicyShared>&&>::
+           value));
+  EXPECT_FALSE((std::is_assignable<
+                LPtr<LockPolicyUpgrade>&,
+                LPtr<LockPolicyTryShared>&&>::value));
+  EXPECT_FALSE((std::is_assignable<
+                LPtr<LockPolicyUpgrade>&,
+                LPtr<LockPolicyFromExclusiveToShared>&&>::value));
+  EXPECT_FALSE((std::is_assignable<
+                LPtr<LockPolicyUpgrade>&,
+                LPtr<LockPolicyFromUpgradeToShared>&&>::value));
+  EXPECT_FALSE((std::is_assignable<
+                LPtr<LockPolicyUpgrade>&,
+                LPtr<LockPolicyFromUpgradeToExclusive>&&>::value));
+}
+
+TEST_F(SynchronizedLockTest, TestConvertTryLockToLock) {
+  auto synchronized = folly::Synchronized<int>{0};
+  auto wlock = synchronized.wlock();
+  wlock.unlock();
+
+  auto ulock = synchronized.ulock();
+  wlock = ulock.moveFromUpgradeToWrite();
+  wlock.unlock();
+
+  auto value = synchronized.withWLock([](auto& integer) { return integer; });
+  EXPECT_EQ(value, 0);
+}
+
+TEST(FollyLockTest, TestVariadicLockWithSynchronized) {
+  {
+    auto syncs = std::array<folly::Synchronized<int>, 3>{};
+    auto& one = syncs[0];
+    auto& two = syncs[1];
+    auto& three = syncs[2];
+    auto locks =
+        lock(folly::wlock(one), folly::rlock(two), folly::wlock(three));
+    EXPECT_TRUE(std::get<0>(locks));
+    EXPECT_TRUE(std::get<1>(locks));
+    EXPECT_TRUE(std::get<2>(locks));
+  }
+  {
+    auto syncs = std::array<folly::Synchronized<int, std::mutex>, 2>{};
+    auto locks = lock(folly::lock(syncs[0]), folly::lock(syncs[1]));
+    EXPECT_TRUE(std::get<0>(locks));
+    EXPECT_TRUE(std::get<1>(locks));
+  }
+}
+
+TEST(FollyLockTest, TestVariadicLockWithArbitraryLockables) {
+  auto&& one = std::mutex{};
+  auto&& two = std::mutex{};
+
+  auto lckOne = std::unique_lock<std::mutex>{one, std::defer_lock};
+  auto lckTwo = std::unique_lock<std::mutex>{two, std::defer_lock};
+  folly::lock(lckOne, lckTwo);
+  EXPECT_TRUE(lckOne);
+  EXPECT_TRUE(lckTwo);
+}
+
+namespace {
+struct TestLock {
+ public:
+  void lock() {
+    onLock();
+    ++numTimesLocked;
+  }
+  bool try_lock() {
+    if (shouldTryLockSucceed) {
+      lock();
+      return true;
+    }
+    return false;
+  }
+  void unlock() {
+    onUnlock();
+    ++numTimesUnlocked;
+  }
+
+  int numTimesLocked{0};
+  int numTimesUnlocked{0};
+  bool shouldTryLockSucceed{true};
+  std::function<void()> onLock{[] {}};
+  std::function<void()> onUnlock{[] {}};
+};
+} // namespace
+
+TEST(FollyLockTest, TestVariadicLockSmartAndPoliteAlgorithm) {
+  auto one = TestLock{};
+  auto two = TestLock{};
+  auto three = TestLock{};
+  auto makeReset = [&] {
+    return folly::makeGuard([&] {
+      one = TestLock{};
+      two = TestLock{};
+      three = TestLock{};
+    });
+  };
+
+  {
+    auto reset = makeReset();
+    folly::lock(one, two, three);
+    EXPECT_EQ(one.numTimesLocked, 1);
+    EXPECT_EQ(one.numTimesUnlocked, 0);
+    EXPECT_EQ(two.numTimesLocked, 1);
+    EXPECT_EQ(two.numTimesUnlocked, 0);
+    EXPECT_EQ(three.numTimesLocked, 1);
+    EXPECT_EQ(three.numTimesUnlocked, 0);
+  }
+
+  {
+    auto reset = makeReset();
+    two.shouldTryLockSucceed = false;
+    folly::lock(one, two, three);
+    EXPECT_EQ(one.numTimesLocked, 2);
+    EXPECT_EQ(one.numTimesUnlocked, 1);
+    EXPECT_EQ(two.numTimesLocked, 1);
+    EXPECT_EQ(two.numTimesUnlocked, 0);
+    EXPECT_EQ(three.numTimesLocked, 1);
+    EXPECT_EQ(three.numTimesUnlocked, 0);
+  }
+
+  {
+    auto reset = makeReset();
+    three.shouldTryLockSucceed = false;
+    folly::lock(one, two, three);
+    EXPECT_EQ(one.numTimesLocked, 2);
+    EXPECT_EQ(one.numTimesUnlocked, 1);
+    EXPECT_EQ(two.numTimesLocked, 2);
+    EXPECT_EQ(two.numTimesUnlocked, 1);
+    EXPECT_EQ(three.numTimesLocked, 1);
+    EXPECT_EQ(three.numTimesUnlocked, 0);
+  }
+
+  {
+    auto reset = makeReset();
+    three.shouldTryLockSucceed = false;
+
+    three.onLock = [&] {
+      // when three gets locked make one fail
+      one.shouldTryLockSucceed = false;
+      // then when one gets locked make three succeed to finish the test
+      one.onLock = [&] { three.shouldTryLockSucceed = true; };
+    };
+
+    folly::lock(one, two, three);
+    EXPECT_EQ(one.numTimesLocked, 2);
+    EXPECT_EQ(one.numTimesUnlocked, 1);
+    EXPECT_EQ(two.numTimesLocked, 2);
+    EXPECT_EQ(two.numTimesUnlocked, 1);
+    EXPECT_EQ(three.numTimesLocked, 2);
+    EXPECT_EQ(three.numTimesUnlocked, 1);
+  }
+}
+
+} // namespace folly

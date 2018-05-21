@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Facebook, Inc.
+ * Copyright 2015-present Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,11 +16,12 @@
 
 #include <algorithm>
 #include <atomic>
-#include <exception>
 #include <vector>
-#include <folly/futures/Future.h>
 
-#include <gtest/gtest.h>
+#include <folly/futures/Retrying.h>
+#include <folly/futures/test/TestExecutor.h>
+#include <folly/portability/GTest.h>
+#include <folly/portability/SysResource.h>
 
 using namespace std;
 using namespace std::chrono;
@@ -74,6 +75,35 @@ TEST(RetryingTest, basic) {
   EXPECT_EQ(2, r.value());
 }
 
+TEST(RetryingTest, future_factory_throws) {
+  struct ReturnedException : exception {};
+  struct ThrownException : exception {};
+  auto result = futures::retrying(
+                    [](size_t n, const exception_wrapper&) { return n < 2; },
+                    [](size_t n) {
+                      switch (n) {
+                        case 0:
+                          return makeFuture<size_t>(
+                              make_exception_wrapper<ReturnedException>());
+                        case 1:
+                          throw ThrownException();
+                        default:
+                          return makeFuture(n);
+                      }
+                    })
+                    .wait()
+                    .getTry();
+  EXPECT_THROW(result.throwIfFailed(), ThrownException);
+}
+
+TEST(RetryingTest, policy_throws) {
+  struct eggs : exception {};
+  auto r = futures::retrying(
+      [](size_t, exception_wrapper) -> bool { throw eggs(); },
+      [](size_t) -> Future<size_t> { throw std::runtime_error("ha"); });
+  EXPECT_THROW(r.get(), eggs);
+}
+
 TEST(RetryingTest, policy_future) {
   atomic<size_t> sleeps {0};
   auto r = futures::retrying(
@@ -121,6 +151,27 @@ TEST(RetryingTest, policy_capped_jittered_exponential_backoff) {
   });
 }
 
+TEST(RetryingTest, policy_capped_jittered_exponential_backoff_many_retries) {
+  using namespace futures::detail;
+  mt19937_64 rng(0);
+  Duration min_backoff(1);
+
+  Duration max_backoff(10000000);
+  Duration backoff = retryingJitteredExponentialBackoffDur(
+      80, min_backoff, max_backoff, 0, rng);
+  EXPECT_EQ(backoff, max_backoff);
+
+  max_backoff = Duration(std::numeric_limits<int64_t>::max());
+  backoff = retryingJitteredExponentialBackoffDur(
+      63, min_backoff, max_backoff, 0, rng);
+  EXPECT_LT(backoff, max_backoff);
+
+  max_backoff = Duration(std::numeric_limits<int64_t>::max());
+  backoff = retryingJitteredExponentialBackoffDur(
+      64, min_backoff, max_backoff, 0, rng);
+  EXPECT_EQ(backoff, max_backoff);
+}
+
 TEST(RetryingTest, policy_sleep_defaults) {
   multiAttemptExpectDurationWithin(5, milliseconds(200), milliseconds(400), []{
     //  To ensure that this compiles with default params.
@@ -136,6 +187,50 @@ TEST(RetryingTest, policy_sleep_defaults) {
     ).wait();
     EXPECT_EQ(2, r.value());
   });
+}
+
+TEST(RetryingTest, large_retries) {
+  rlimit oldMemLimit;
+  PCHECK(getrlimit(RLIMIT_AS, &oldMemLimit) == 0);
+
+  rlimit newMemLimit;
+  newMemLimit.rlim_cur =
+      std::min(static_cast<rlim_t>(1UL << 30), oldMemLimit.rlim_max);
+  newMemLimit.rlim_max = oldMemLimit.rlim_max;
+  if (!folly::kIsSanitizeAddress) { // ASAN reserves outside of the rlimit
+    PCHECK(setrlimit(RLIMIT_AS, &newMemLimit) == 0);
+  }
+  SCOPE_EXIT {
+    PCHECK(setrlimit(RLIMIT_AS, &oldMemLimit) == 0);
+  };
+
+  TestExecutor executor(4);
+  // size of implicit promise is at least the size of the return.
+  using LargeReturn = array<uint64_t, 16000>;
+  auto func = [&executor](size_t retryNum) -> Future<LargeReturn> {
+    return via(&executor).then([retryNum] {
+      return retryNum < 10000
+          ? makeFuture<LargeReturn>(
+                make_exception_wrapper<std::runtime_error>("keep trying"))
+          : makeFuture<LargeReturn>(LargeReturn());
+    });
+  };
+
+  vector<Future<LargeReturn>> futures;
+  for (auto idx = 0; idx < 40; ++idx) {
+    futures.emplace_back(futures::retrying(
+        [&executor](size_t, const exception_wrapper&) {
+          return via(&executor).then([] { return true; });
+        },
+        func));
+  }
+
+  // 40 * 10,000 * 16,000B > 1GB; we should avoid OOM
+
+  for (auto& f : futures) {
+    f.wait();
+    EXPECT_TRUE(f.hasValue());
+  }
 }
 
 /*

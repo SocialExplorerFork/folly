@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Facebook, Inc.
+ * Copyright 2013-present Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,17 +16,10 @@
 
 #pragma once
 
-// This needs to be above semaphore.h due to the windows
-// libevent implementation needing mode_t to be defined,
-// but defining it differently than our portability
-// headers do.
-#include <folly/portability/SysTypes.h>
-
 #include <assert.h>
 #include <boost/noncopyable.hpp>
 #include <errno.h>
 #include <glog/logging.h>
-#include <semaphore.h>
 #include <atomic>
 #include <functional>
 #include <mutex>
@@ -35,8 +28,10 @@
 #include <vector>
 
 #include <folly/ScopeGuard.h>
-#include <folly/detail/CacheLocality.h>
+#include <folly/concurrency/CacheLocality.h>
 #include <folly/detail/Futex.h>
+#include <folly/portability/Semaphore.h>
+#include <folly/synchronization/detail/AtomicUtils.h>
 
 namespace folly {
 namespace test {
@@ -50,6 +45,10 @@ namespace test {
               << __VA_ARGS__;                                   \
     }                                                           \
   } while (false)
+
+/* signatures of user-defined auxiliary functions */
+using AuxAct = std::function<void(bool)>;
+using AuxChk = std::function<void(uint64_t)>;
 
 /**
  * DeterministicSchedule coordinates the inter-thread communication of a
@@ -79,7 +78,8 @@ class DeterministicSchedule : boost::noncopyable {
    * DeterministicSchedule::thread on a thread participating in this
    * schedule) to participate in a deterministic schedule.
    */
-  explicit DeterministicSchedule(const std::function<int(int)>& scheduler);
+  explicit DeterministicSchedule(
+      const std::function<size_t(size_t)>& scheduler);
 
   /** Completes the schedule. */
   ~DeterministicSchedule();
@@ -91,7 +91,7 @@ class DeterministicSchedule : boost::noncopyable {
    * inter-thread communication are random variables following a poisson
    * distribution.
    */
-  static std::function<int(int)> uniform(long seed);
+  static std::function<size_t(size_t)> uniform(uint64_t seed);
 
   /**
    * Returns a scheduling function that chooses a subset of the active
@@ -99,9 +99,8 @@ class DeterministicSchedule : boost::noncopyable {
    * runnable thread.  The subset is chosen with size n, and the choice
    * is made every m steps.
    */
-  static std::function<int(int)> uniformSubset(long seed,
-                                               int n = 2,
-                                               int m = 64);
+  static std::function<size_t(size_t)>
+  uniformSubset(uint64_t seed, size_t n = 2, size_t m = 64);
 
   /** Obtains permission for the current thread to perform inter-thread
    *  communication. */
@@ -162,26 +161,35 @@ class DeterministicSchedule : boost::noncopyable {
 
   /** Used scheduler_ to get a random number b/w [0, n). If tls_sched is
    *  not set-up it falls back to std::rand() */
-  static int getRandNumber(int n);
+  static size_t getRandNumber(size_t n);
 
   /** Deterministic implemencation of getcpu */
   static int getcpu(unsigned* cpu, unsigned* node, void* unused);
 
   /** Sets up a thread-specific function for call immediately after
-   *  the next shared access for managing auxiliary data and checking
-   *  global invariants. The parameters of the function are: a
-   *  uint64_t that indicates the step number (i.e., the number of
-   *  shared accesses so far), and a bool that indicates the success
-   *  of the shared access (if it is conditional, true otherwise). */
-  static void setAux(std::function<void(uint64_t, bool)>& aux);
+   *  the next shared access by the thread for managing auxiliary
+   *  data. The function takes a bool parameter that indicates the
+   *  success of the shared access (if it is conditional, true
+   *  otherwise). The function is cleared after one use. */
+  static void setAuxAct(AuxAct& aux);
+
+  /** Sets up a function to be called after every subsequent shared
+   *  access (until clearAuxChk() is called) for checking global
+   *  invariants and logging. The function takes a uint64_t parameter
+   *  that indicates the number of shared accesses so far. */
+  static void setAuxChk(AuxChk& aux);
+
+  /** Clears the function set by setAuxChk */
+  static void clearAuxChk();
 
  private:
   static FOLLY_TLS sem_t* tls_sem;
   static FOLLY_TLS DeterministicSchedule* tls_sched;
   static FOLLY_TLS unsigned tls_threadId;
-  static FOLLY_TLS std::function<void(uint64_t, bool)>* tls_aux;
+  static thread_local AuxAct tls_aux_act;
+  static AuxChk aux_chk;
 
-  std::function<int(int)> scheduler_;
+  std::function<size_t(size_t)> scheduler_;
   std::vector<sem_t*> sems_;
   std::unordered_set<std::thread::id> active_;
   unsigned nextThreadId_;
@@ -218,10 +226,20 @@ struct DeterministicAtomic {
   bool is_lock_free() const noexcept { return data.is_lock_free(); }
 
   bool compare_exchange_strong(
-      T& v0, T v1, std::memory_order mo = std::memory_order_seq_cst) noexcept {
+      T& v0,
+      T v1,
+      std::memory_order mo = std::memory_order_seq_cst) noexcept {
+    return compare_exchange_strong(
+        v0, v1, mo, ::folly::detail::default_failure_memory_order(mo));
+  }
+  bool compare_exchange_strong(
+      T& v0,
+      T v1,
+      std::memory_order success,
+      std::memory_order failure) noexcept {
     DeterministicSchedule::beforeSharedAccess();
     auto orig = v0;
-    bool rv = data.compare_exchange_strong(v0, v1, mo);
+    bool rv = data.compare_exchange_strong(v0, v1, success, failure);
     FOLLY_TEST_DSCHED_VLOG(this << ".compare_exchange_strong(" << std::hex
                                 << orig << ", " << std::hex << v1 << ") -> "
                                 << rv << "," << std::hex << v0);
@@ -230,10 +248,20 @@ struct DeterministicAtomic {
   }
 
   bool compare_exchange_weak(
-      T& v0, T v1, std::memory_order mo = std::memory_order_seq_cst) noexcept {
+      T& v0,
+      T v1,
+      std::memory_order mo = std::memory_order_seq_cst) noexcept {
+    return compare_exchange_weak(
+        v0, v1, mo, ::folly::detail::default_failure_memory_order(mo));
+  }
+  bool compare_exchange_weak(
+      T& v0,
+      T v1,
+      std::memory_order success,
+      std::memory_order failure) noexcept {
     DeterministicSchedule::beforeSharedAccess();
     auto orig = v0;
-    bool rv = data.compare_exchange_weak(v0, v1, mo);
+    bool rv = data.compare_exchange_weak(v0, v1, success, failure);
     FOLLY_TEST_DSCHED_VLOG(this << ".compare_exchange_weak(" << std::hex << orig
                                 << ", " << std::hex << v1 << ") -> " << rv
                                 << "," << std::hex << v0);
@@ -454,8 +482,8 @@ struct DeterministicMutex {
     m.unlock();
   }
 };
-}
-} // namespace folly::test
+} // namespace test
+} // namespace folly
 
 /* Specialization declarations */
 
@@ -468,11 +496,12 @@ int Futex<test::DeterministicAtomic>::futexWake(int count, uint32_t wakeMask);
 template <>
 FutexResult Futex<test::DeterministicAtomic>::futexWaitImpl(
     uint32_t expected,
-    std::chrono::time_point<std::chrono::system_clock>* absSystemTime,
-    std::chrono::time_point<std::chrono::steady_clock>* absSteadyTime,
+    std::chrono::system_clock::time_point const* absSystemTime,
+    std::chrono::steady_clock::time_point const* absSteadyTime,
     uint32_t waitMask);
+} // namespace detail
 
 template <>
 Getcpu::Func AccessSpreader<test::DeterministicAtomic>::pickGetcpuFunc();
-}
-} // namespace folly::detail
+
+} // namespace folly

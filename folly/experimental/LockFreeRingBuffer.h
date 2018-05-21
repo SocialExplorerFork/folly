@@ -1,5 +1,5 @@
 /*
- * Copyright 2016 Facebook, Inc.
+ * Copyright 2015-present Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,12 +17,12 @@
 #pragma once
 
 #include <atomic>
-#include <boost/noncopyable.hpp>
-#include <iostream>
 #include <cmath>
+#include <cstring>
 #include <memory>
-#include <string.h>
 #include <type_traits>
+
+#include <boost/noncopyable.hpp>
 
 #include <folly/Portability.h>
 #include <folly/detail/TurnSequencer.h>
@@ -32,8 +32,7 @@
 namespace folly {
 namespace detail {
 
-template<typename T,
-         template<typename> class Atom>
+template <typename T, template <typename> class Atom>
 class RingBufferSlot;
 } // namespace detail
 
@@ -56,16 +55,17 @@ class RingBufferSlot;
 /// "future" can optionally block but reads from the "past" will always fail.
 ///
 
-template<typename T, template<typename> class Atom = std::atomic>
+template <typename T, template <typename> class Atom = std::atomic>
 class LockFreeRingBuffer: boost::noncopyable {
+  static_assert(
+      std::is_nothrow_default_constructible<T>::value,
+      "Element type must be nothrow default constructible");
 
-   static_assert(std::is_nothrow_default_constructible<T>::value,
-       "Element type must be nothrow default constructible");
+  static_assert(
+      FOLLY_IS_TRIVIALLY_COPYABLE(T),
+      "Element type must be trivially copyable");
 
-   static_assert(FOLLY_IS_TRIVIALLY_COPYABLE(T),
-       "Element type must be trivially copyable");
-
-public:
+ public:
   /// Opaque pointer to a past or future write.
   /// Can be moved relative to its current location but not in absolute terms.
   struct Cursor {
@@ -91,7 +91,7 @@ public:
       return prevTicket != ticket;
     }
 
-  protected: // for test visibility reasons
+   protected: // for test visibility reasons
     uint64_t ticket;
     friend class LockFreeRingBuffer;
   };
@@ -163,7 +163,7 @@ public:
   ~LockFreeRingBuffer() {
   }
 
-private:
+ private:
   const uint32_t capacity_;
 
   const std::unique_ptr<detail::RingBufferSlot<T,Atom>[]> slots_;
@@ -180,9 +180,9 @@ private:
 }; // LockFreeRingBuffer
 
 namespace detail {
-template<typename T, template<typename> class Atom>
+template <typename T, template <typename> class Atom>
 class RingBufferSlot {
-public:
+ public:
   explicit RingBufferSlot() noexcept
     : sequencer_()
     , data()
@@ -204,7 +204,8 @@ public:
   bool waitAndTryRead(T& dest, uint32_t turn) noexcept {
     uint32_t desired_turn = (turn + 1) * 2;
     Atom<uint32_t> cutoff(0);
-    if(!sequencer_.tryWaitForTurn(desired_turn, cutoff, false)) {
+    if (sequencer_.tryWaitForTurn(desired_turn, cutoff, false) !=
+        TurnSequencer<Atom>::TryWaitResult::SUCCESS) {
       return false;
     }
     memcpy(&dest, &data, sizeof(T));
@@ -224,8 +225,7 @@ public:
     return sequencer_.isTurn((turn + 1) * 2);
   }
 
-
-private:
+ private:
   TurnSequencer<Atom> sequencer_;
   T data;
 }; // RingBufferSlot
